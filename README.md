@@ -118,6 +118,20 @@ watches in the background.
   VirusTotal, which still reveals *what* you run to a third party. Needs your
   own free API key.
 
+## Installing
+
+Download the latest release, unzip, and drag `DragonWatch.app` to
+`/Applications`. It lives in the menu bar — there is no Dock icon while it
+runs.
+
+Releases are ad-hoc signed, so the **first** launch needs **right-click →
+Open** instead of a double-click; macOS only offers the override from the
+context menu. Every launch after that is normal. Signing it any other way
+needs a paid Apple Developer account, which this project does not have.
+
+Would rather not trust a binary at all? Build it yourself — that is the
+stronger option for a tool like this, and it sidesteps the warning entirely.
+
 ## Building
 
 ```sh
@@ -139,9 +153,6 @@ trojanized rebuild can't quietly impersonate a real one:
 ```sh
 shasum -a 256 -c DragonWatch-<version>.zip.sha256
 ```
-
-Releases are ad-hoc signed; building from source is always the strongest
-verification.
 
 ## Contributing
 

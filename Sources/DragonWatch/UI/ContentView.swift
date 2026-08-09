@@ -113,6 +113,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear search")
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, 12)
@@ -184,10 +185,30 @@ struct ContentView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             }
-            Button("Quit DragonWatch") {
+            Button {
+                model.runFullSweep()
+            } label: {
+                if model.sweeping {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .controlSize(.regular)
+            .disabled(model.sweeping)
+            .help(
+                model.sweeping
+                    ? "Sweeping…"
+                    : "Full sweep — re-check every running process now, ignoring cached results"
+            )
+            .accessibilityLabel(model.sweeping ? "Sweeping" : "Run a full sweep now")
+
+            Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
             .controlSize(.regular)
+            .help("Quit DragonWatch")
+            .accessibilityLabel("Quit DragonWatch")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -213,6 +234,10 @@ struct ContentView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Sort: \(sort.label)")
+        // `.help` is a mouse tooltip: it reaches neither VoiceOver nor the
+        // keyboard, so an icon-only menu is announced as an unnamed button.
+        .accessibilityLabel("Sort process list")
+        .accessibilityValue(sort.label)
     }
 
     private func tabButton(_ target: PanelTab, systemImage: String, help: String) -> some View {

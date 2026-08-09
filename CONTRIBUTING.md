@@ -23,32 +23,34 @@ launch-at-login need a bundle identifier.
 
 ## Verifying the watcher for real
 
-Unit tests cover the logic; these prove the wiring. Each should raise exactly
-one alert, and each cleans up after itself.
+Unit tests cover the rules; this proves the wiring — that something appearing
+on disk becomes an alert.
 
 ```sh
-# new-suspicious-process: an unsigned binary in /tmp
-printf '#include <unistd.h>\nint main(void){for(;;)sleep(1);}\n' > /tmp/dw_canary.c
-cc -o /tmp/dw_canary /tmp/dw_canary.c && codesign --remove-signature /tmp/dw_canary
-/tmp/dw_canary &            # cleanup: kill %1; rm /tmp/dw_canary*
-
-# new-persistence-item: an inert LaunchAgent (no RunAtLoad, points at /usr/bin/true)
-printf '<plist version="1.0"><dict><key>Label</key><string>com.dragonwatch.test</string>\
-<key>ProgramArguments</key><array><string>/usr/bin/true</string></array></dict></plist>' \
-  > ~/Library/LaunchAgents/com.dragonwatch.test.plist
-# cleanup: rm ~/Library/LaunchAgents/com.dragonwatch.test.plist
-
-# binary-replaced: run a signed binary, then swap an unsigned one onto its path
-mkdir -p ~/dwtest && cp /bin/sleep ~/dwtest/tool && ~/dwtest/tool 60 &
-sleep 65 && cc -o ~/dwtest/tool /tmp/dw_canary.c && codesign --remove-signature ~/dwtest/tool
-~/dwtest/tool &             # cleanup: kill %1; rm -rf ~/dwtest
+open build/DragonWatch.app     # must be running; leave the popover closed
+./Scripts/verify-watcher.sh    # ~5 min
 ```
 
-Also measure rather than assume: idle CPU and memory with the popover closed
-(Activity Monitor, after a few minutes at the background cadence), and whether
-a quiet machine stays quiet over 24 h. Figures belong in the README only once
-someone has measured them — the app's credibility rests on not publishing
-numbers nobody checked.
+It plants three benign cases (an unsigned binary in a private temp directory,
+an inert LaunchAgent, and an ad-hoc-signed binary replaced by an unsigned one
+at the same path), reads the app's own observation ledger to confirm each
+alert fired, and removes everything it created on any exit. All three pass as
+of the last run.
+
+Two things it has to work around, both learned the hard way:
+
+- **macOS SIGKILLs a copied Apple platform binary** (exit 137) — the kernel
+  validates platform binaries against its trust cache by cdhash, so a copy
+  never executes. The downgrade case therefore uses an ad-hoc-signed binary we
+  build ourselves, not a copy of `/bin/sleep`.
+- **The ledger records every path permanently and alerts fire once per path**,
+  so each run uses unique paths. A fixed name passes once and silently tests
+  nothing afterwards.
+
+Also measure rather than assume: idle CPU and memory with the popover closed,
+over at least half an hour — a single reading minutes after launch missed a
+memory leak that only appeared once provenance hashing had worked through the
+queue. Figures belong in the README only once someone has measured them.
 
 ## Definition of done
 
@@ -63,6 +65,11 @@ A change is not finished until all of these are true:
 4. Comments still match the code they describe; delete any that no longer do.
 5. New scoring rules or alert kinds have matching text in `TrustExplanation`
    and `CriteriaView` (see the transparency invariant below).
+6. **Anything in `Scripts/` is reviewed like shipped code**, because it runs on
+   a contributor's machine with their privileges. Never write to a predictable
+   path under `/tmp` — shell redirection follows symlinks, so a pre-placed link
+   redirects the write to any file the user can modify; use `mktemp -d`. Put
+   cleanup in `trap … EXIT INT TERM`, and delete only what the run created.
 
 ## Invariants — do not break these
 
@@ -89,9 +96,20 @@ A change is not finished until all of these are true:
 - **Context can only lower a rating, never raise it.** External intel can add
   suspicion, never trust. The only paths to trust are a strong signature, the
   pid-verified self exemption, and a verified bundle seal.
-- **Seal vouches name specific binaries** (path + mtime + size), never bundle
-  membership — vouching a whole bundle would let a planted binary inherit
-  trust.
+- **`TrustScoring.applies` is the only place a modifier's relevance is
+  decided.** `badge` and `TrustExplanation` both read it, so an explanation
+  can never list a demotion the score did not apply. They drifted apart once
+  and the UI showed stock Apple binaries a "lowered" step above a `Trusted`
+  result.
+- **Signature validation must include the executable.** Use
+  `SecCSFlags(rawValue: 4)` (`kSecCSDoNotValidateResources`), never
+  `kSecCSBasicValidateOnly` (6) — 6 also skips the code pages, so a binary
+  patched in place validates clean. Verified by execution; there is a test.
+- **Seal vouches name specific binaries**, identified by their *contents*
+  (cdhash, or SHA-256 when unsigned), never bundle membership and never
+  `mtime`/`size` — both of those are settable by whoever can write the file,
+  so a swapped binary kept its vouch. The fingerprint is re-checked on every
+  assessment, not only when the vouch map is loaded.
 - **Intel that sends data is on-demand only.** MalwareBazaar is the one
   background exception because matching is local. Every provider carries a
   `privacyDisclosure` and defaults to off.

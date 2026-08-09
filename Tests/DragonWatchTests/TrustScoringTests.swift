@@ -126,17 +126,28 @@ final class TrustScoringTests: XCTestCase {
             .caution)
     }
 
-    /// Trusted apps talk to the network constantly — the modifier only means
-    /// something on a weak signature.
-    func testNetworkActiveAppliesOnlyToWeakSignatures() {
+    /// Trusted apps talk to the network constantly — the modifier means
+    /// something exactly when nobody identifiable is accountable for the
+    /// binary, which is every tier that does not start out trusted.
+    ///
+    /// `.validSigned` (a valid signature from a self-issued authority) used to
+    /// be exempt, alone among the four modifiers, while the exemption text the
+    /// UI printed for it — "the signal only means something when nobody is
+    /// accountable for the binary" — argued for applying it.
+    func testNetworkActiveAppliesWhereverNobodyIsAccountable() {
+        XCTAssertEqual(
+            TrustScoring.badge(tier: .validSigned, modifiers: [.networkActive]),
+            .suspicious)
         XCTAssertEqual(
             TrustScoring.badge(tier: .adHoc, modifiers: [.networkActive]), .suspicious)
         XCTAssertEqual(
-            TrustScoring.badge(tier: .developerID, modifiers: [.networkActive]),
-            .trusted)
-        XCTAssertEqual(
-            TrustScoring.badge(tier: .validSigned, modifiers: [.networkActive]),
-            .caution)
+            TrustScoring.badge(tier: .unsigned, modifiers: [.networkActive]), .suspicious)
+        for tier in SignatureTier.allCases
+        where TrustScoring.base(for: tier) == .trusted {
+            XCTAssertEqual(
+                TrustScoring.badge(tier: tier, modifiers: [.networkActive]), .trusted,
+                "\(tier) is accountable, so network activity says nothing")
+        }
     }
 
     /// The Electron rule: JIT/debug entitlements are routine for strongly

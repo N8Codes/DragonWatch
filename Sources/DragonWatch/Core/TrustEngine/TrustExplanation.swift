@@ -36,8 +36,9 @@ enum TrustExplanation {
                 Step(
                     symbol: "checkmark.seal",
                     text:
-                        "You verified \((bundle as NSString).lastPathComponent)'s full signature seal while this exact binary was running, so it is provably what the vendor shipped. That overrides the weak signature — and only this binary, not anything else in the bundle.",
+                        "You verified \((bundle as NSString).lastPathComponent)'s full signature seal while this exact binary was running, and its contents still match what was there then. That overrides the weak signature — and only this binary, not anything else in the bundle.",
                     lowered: false))
+            steps.append(resultStep(for: assessment))
             return steps
         }
 
@@ -54,11 +55,15 @@ enum TrustExplanation {
                     lowered: true))
         }
         for modifier in RiskModifier.allCases where ignored.contains(modifier) {
+            let reason =
+                assessment.tier == .applePlatform
+                ? "Context signals describe how software was delivered and where it lives; macOS's own files are the platform, so they say nothing."
+                : modifier.exemptionRationale
             steps.append(
                 Step(
                     symbol: "minus.circle",
                     text:
-                        "\(modifier.explanation) — not counted against a \(assessment.tier.rawValue.lowercased()) binary. \(modifier.exemptionRationale)",
+                        "\(modifier.explanation) — not counted against a \(assessment.tier.rawValue.lowercased()) binary. \(reason)",
                     lowered: nil))
         }
 
@@ -70,13 +75,22 @@ enum TrustExplanation {
                     lowered: false))
         }
 
-        steps.append(
-            Step(
-                symbol: "equal.circle",
-                text:
-                    "Result: \(assessment.badge.label). Signatures set the starting point; context can only lower it, never raise it.",
-                lowered: nil))
+        steps.append(resultStep(for: assessment))
         return steps
+    }
+
+    /// Every explanation ends by naming its outcome. The vouched path used to
+    /// return without one, so the single rating the user had done work to
+    /// change was the one that never told them what it became.
+    private static func resultStep(for assessment: TrustAssessment) -> Step {
+        let rule =
+            assessment.vouchedByBundle != nil
+            ? "A verified signature seal is the one thing that raises a rating; context can only lower it."
+            : "Signatures set the starting point; context can only lower it, never raise it."
+        return Step(
+            symbol: "equal.circle",
+            text: "Result: \(assessment.badge.label). \(rule)",
+            lowered: nil)
     }
 
     static func signatureExplanation(_ tier: SignatureTier) -> String {
@@ -95,6 +109,10 @@ enum TrustExplanation {
             "No code signature at all — nothing vouches for where this came from or whether it has been modified."
         case .invalid:
             "The signature is present but does not validate: the file has been modified since signing, or its certificate was revoked."
+        case .osManagedUnreadable:
+            "Part of the macOS install, in a directory that only root can write and System Integrity Protection guards. DragonWatch runs as you, so it cannot read the file to check the signature — this rating comes from where the file lives, not from verifying it."
+        case .unreadable:
+            "DragonWatch cannot read this file, so nothing about it can be checked — and unlike a system daemon, it is not somewhere macOS manages."
         }
     }
 }

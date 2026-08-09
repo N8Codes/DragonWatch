@@ -9,7 +9,9 @@ import Foundation
 @Observable final class IntelCenter {
     enum CheckState {
         case running
-        case done([IntelFinding])
+        /// Findings, plus any provider that could not be reached. A provider
+        /// failing is not a reason to withhold what the others found.
+        case done([IntelFinding], problems: [String] = [])
         case failed(String)
     }
     private(set) var results: [String: CheckState] = [:]
@@ -87,27 +89,34 @@ import Foundation
             if mbEnabled { providers.append(MalwareBazaarProvider(store: malwareStore)) }
             if vtEnabled { providers.append(VirusTotalProvider(apiKey: vtKey)) }
 
+            // One provider's failure must not discard another's findings.
+            // Returning on the first error meant a VirusTotal rate limit — the
+            // expected state on a free key's fifth lookup in a minute — threw
+            // away a MalwareBazaar hit that had already come back saying the
+            // binary is catalogued malware, and showed only the rate-limit
+            // message.
             var findings: [IntelFinding] = []
+            var problems: [String] = []
             for provider in providers {
                 do {
                     findings += try await provider.findings(for: subject)
                 } catch VirusTotalProvider.LookupError.missingKey {
-                    results[path] = .failed("VirusTotal needs an API key (Settings).")
-                    return
+                    problems.append("VirusTotal needs an API key (Settings).")
                 } catch VirusTotalProvider.LookupError.invalidKey {
-                    results[path] = .failed("VirusTotal rejected the API key.")
-                    return
+                    problems.append("VirusTotal rejected the API key.")
                 } catch VirusTotalProvider.LookupError.rateLimited {
-                    results[path] = .failed(
+                    problems.append(
                         "VirusTotal rate limit hit — free keys allow 4 lookups/min.")
-                    return
                 } catch {
-                    results[path] = .failed("\(provider.name) lookup failed.")
-                    return
+                    problems.append("\(provider.name) lookup failed.")
                 }
             }
+            if findings.isEmpty, !problems.isEmpty {
+                results[path] = .failed(problems.joined(separator: " "))
+                return
+            }
             results[path] = .done(
-                findings.sorted { $0.severity > $1.severity })
+                findings.sorted { $0.severity > $1.severity }, problems: problems)
         }
     }
 

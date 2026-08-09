@@ -16,8 +16,16 @@ struct ProcessGroup: Identifiable, Sendable {
     var members: [MonitoredProcess]
 
     var id: String { key }
-    var totalCPU: Double { members.reduce(0) { $0 + $1.record.cpuPercent } }
-    var totalMemory: UInt64 { members.reduce(0) { $0 + $1.record.residentBytes } }
+    /// Sums only the members whose metrics the kernel let us read; a group of
+    /// root-owned processes therefore totals nil rather than a misleading 0.
+    var totalCPU: Double? {
+        let known = members.compactMap(\.record.cpuPercent)
+        return known.isEmpty ? nil : known.reduce(0, +)
+    }
+    var totalMemory: UInt64? {
+        let known = members.compactMap(\.record.residentBytes)
+        return known.isEmpty ? nil : known.reduce(0, +)
+    }
     var worstBadge: TrustBadge { members.map(\.trust.badge).max() ?? .trusted }
 }
 

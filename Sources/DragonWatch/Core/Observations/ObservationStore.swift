@@ -22,9 +22,14 @@ actor ObservationStore {
             {
                 ledger = decoded
             } else {
-                // Unknown schema: move aside rather than destroy.
-                try? FileManager.default.moveItem(
-                    at: fileURL, to: fileURL.appendingPathExtension("bak"))
+                // Unknown schema: move aside rather than destroy. The old
+                // backup has to go first — `moveItem` throws when the
+                // destination exists, and with the error swallowed the file
+                // stayed put and was overwritten by the next save, which is
+                // exactly the destruction this branch exists to prevent.
+                let backup = fileURL.appendingPathExtension("bak")
+                try? FileManager.default.removeItem(at: backup)
+                try? FileManager.default.moveItem(at: fileURL, to: backup)
                 ledger = ObservationLedger()
             }
         } else {
@@ -53,7 +58,9 @@ actor ObservationStore {
     }
 
     func recordHash(path: String, sha256: String, now: Date) -> Bool {
-        let changed = ledger.recordHash(path: path, sha256: sha256, now: now)
+        let changed = ledger.recordHash(
+            path: path, sha256: sha256,
+            stamp: ObservationLedger.FileStamp(path: path), now: now)
         if changed {
             persist(now: now)
         } else {
@@ -62,13 +69,22 @@ actor ObservationStore {
         return changed
     }
 
+    func recordHashAttemptFailed(path: String, now: Date) {
+        ledger.recordHashAttemptFailed(path: path, now: now)
+        lightDirty = true
+    }
+
     func record(event: ObservationLedger.Event) {
         ledger.record(event: event)
         persist(now: event.date)
     }
 
-    func unhashedPaths(among paths: [String], limit: Int) -> [String] {
-        ledger.unhashedPaths(among: paths, limit: limit)
+    func pathsNeedingHash(among paths: [String], limit: Int, now: Date = Date())
+        -> [String]
+    {
+        ledger.pathsNeedingHash(among: paths, limit: limit, now: now) {
+            ObservationLedger.FileStamp(path: $0)
+        }
     }
 
     func identity(for path: String) -> ObservationLedger.Identity? {
@@ -84,6 +100,15 @@ actor ObservationStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return try? encoder.encode(ledger)
+    }
+
+    /// Drops the durable alert record while keeping the provenance history.
+    /// "Clear" has to reach disk: clearing only the in-memory list left the
+    /// events in the ledger, and the next launch re-seeded the list straight
+    /// back from them.
+    func clearEvents(now: Date = Date()) {
+        ledger.events = []
+        persist(now: now)
     }
 
     func wipe() {

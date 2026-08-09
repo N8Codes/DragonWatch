@@ -9,6 +9,12 @@ struct ReviewItem: Identifiable, Sendable {
 
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
+
+    init(path: String, entry: BaselineLedger.Entry) {
+        self.path = path
+        tier = entry.tier
+        firstSeen = entry.firstSeen
+    }
 }
 
 /// Owns the sampling loop and holds the observable state the UI reads.
@@ -19,6 +25,11 @@ struct ReviewItem: Identifiable, Sendable {
     private(set) var overallBadge: TrustBadge = .trusted
     private(set) var hasSampled = false
     private(set) var pendingReview: [ReviewItem] = []
+    /// Items the user answered "not expected" about. Kept separate from
+    /// `pendingReview` — the question has been answered, but the answer was
+    /// "no", and a verdict nothing displays is a verdict the user cannot tell
+    /// they gave.
+    private(set) var markedUnexpected: [ReviewItem] = []
 
     let network = NetworkMonitor()
     let alerts = AlertCenter()
@@ -73,10 +84,11 @@ struct ReviewItem: Identifiable, Sendable {
         alerts.requestAuthorizationIfNeeded()
         Task { [weak self] in
             guard let self else { return }
-            let vouches = await self.sealVerifier.validVouches()
+            let vouches = await self.sealVerifier.vouches()
             guard !vouches.isEmpty else { return }
-            await self.trustEngine.setVouchedBinaries(vouches)
-            for bundle in Set(vouches.values) {
+            await self.trustEngine.setVouchedBinaries(
+                vouches.mapValues { ($0.bundle, $0.identity.fingerprint) })
+            for bundle in Set(vouches.values.map(\.bundle)) {
                 self.sealStates[bundle] = .verified
             }
         }
@@ -108,7 +120,7 @@ struct ReviewItem: Identifiable, Sendable {
         Task {
             await baseline.recordVerdict(
                 path: path, verdict: expected ? .expected : .keepFlagging)
-            pendingReview = await reviewItems()
+            await refreshReviewLists()
         }
     }
 
@@ -117,7 +129,32 @@ struct ReviewItem: Identifiable, Sendable {
             await baseline.reset()
             await observations.wipe()
             pendingReview = []
+            markedUnexpected = []
         }
+    }
+
+    private(set) var sweeping = false
+
+    /// Re-inspects every running process from scratch, right now, instead of
+    /// waiting for the next tick. Clears the signature cache first — it is
+    /// keyed on the file being unchanged, so a sweep that kept it would just
+    /// replay the previous verdicts.
+    func runFullSweep() {
+        guard !sweeping else { return }
+        sweeping = true
+        Task { [weak self] in
+            guard let self else { return }
+            await self.trustEngine.invalidateCache()
+            await self.tick()
+            self.sweeping = false
+        }
+    }
+
+    /// Clears the alert list *and* the durable record behind it, so it stays
+    /// cleared across a relaunch.
+    func clearAlertHistory() {
+        alerts.clearHistory()
+        Task { await observations.clearEvents() }
     }
 
     func observation(for path: String) async -> ObservationLedger.Identity? {
@@ -158,7 +195,9 @@ struct ReviewItem: Identifiable, Sendable {
             self.sealStates[bundlePath] = verified ? .verified : .failed
             if verified {
                 await self.trustEngine.setVouchedBinaries(
-                    await self.sealVerifier.validVouches())
+                    await self.sealVerifier.vouches().mapValues {
+                        ($0.bundle, $0.identity.fingerprint)
+                    })
             }
         }
     }
@@ -270,13 +309,19 @@ struct ReviewItem: Identifiable, Sendable {
                     : lhs.trust.badge > rhs.trust.badge
             }
             .map(\.record.path)
-        let toHash = await observations.unhashedPaths(
+        let toHash = await observations.pathsNeedingHash(
             among: hashCandidates, limit: Rule.hashQueuePerTick)
         if !toHash.isEmpty {
             Task { [weak self] in
                 guard let self else { return }
                 for path in toHash {
-                    guard let hash = await self.intel.hash(ofPath: path) else { continue }
+                    guard let hash = await self.intel.hash(ofPath: path) else {
+                        // Record the failure, or an unreadable binary sits at
+                        // the head of this queue forever.
+                        await self.observations.recordHashAttemptFailed(
+                            path: path, now: Date())
+                        continue
+                    }
                     _ = await self.observations.recordHash(
                         path: path, sha256: hash, now: Date())
                 }
@@ -356,7 +401,9 @@ struct ReviewItem: Identifiable, Sendable {
                 threshold: settings.cpuThresholdPercent,
                 window: Rule.cpuWindow, now: now)
         {
-            let top = groups.max { $0.totalCPU < $1.totalCPU }
+            // Groups whose metrics the kernel withheld cannot be "the top
+            // consumer"; rank only those we can actually measure.
+            let top = groups.max { ($0.totalCPU ?? -1) < ($1.totalCPU ?? -1) }
             raiseAndRecord(
                 .sustainedCPU, key: "system",
                 cooldown: Rule.cpuCooldown,
@@ -395,7 +442,12 @@ struct ReviewItem: Identifiable, Sendable {
             }
         }
 
+        await refreshReviewLists()
+    }
+
+    private func refreshReviewLists() async {
         pendingReview = await reviewItems()
+        markedUnexpected = await unexpectedItems()
     }
 
     /// Latency is displayed in the popover and nowhere else, so it is measured
@@ -428,8 +480,10 @@ struct ReviewItem: Identifiable, Sendable {
     }
 
     private func reviewItems() async -> [ReviewItem] {
-        await baseline.pendingReview().map {
-            ReviewItem(path: $0.path, tier: $0.entry.tier, firstSeen: $0.entry.firstSeen)
-        }
+        await baseline.pendingReview().map(ReviewItem.init)
+    }
+
+    private func unexpectedItems() async -> [ReviewItem] {
+        await baseline.markedUnexpected().map(ReviewItem.init)
     }
 }

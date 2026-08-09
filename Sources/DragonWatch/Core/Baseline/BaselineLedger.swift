@@ -5,6 +5,19 @@ import Foundation
 /// items. It answers a membership question — "have I seen this before, and was
 /// it acceptable?" — so there is exactly one ledger, updated in place.
 struct BaselineLedger: Codable, Sendable {
+    static let currentSchemaVersion = 1
+
+    /// Optional on purpose. Swift's synthesized `Decodable` does **not** fall
+    /// back to a property's default value for a missing key (verified by
+    /// execution — it throws `keyNotFound`), and every baseline written so far
+    /// predates this field. A non-optional version here would fail to decode
+    /// on upgrade, move the file aside, and discard every verdict the user had
+    /// recorded — the exact loss the field was added to prevent.
+    var schemaVersion: Int? = BaselineLedger.currentSchemaVersion
+
+    /// A file with no recorded version is version 1.
+    var effectiveSchemaVersion: Int { schemaVersion ?? 1 }
+
     enum Verdict: String, Codable, Sendable {
         case autoTrusted  // Trusted tier when first seen; added silently
         case expected  // user reviewed and accepted
@@ -71,8 +84,19 @@ struct BaselineLedger: Codable, Sendable {
     /// order — which changes between runs, reshuffling the list under the
     /// user mid-review.
     var pendingReview: [(path: String, entry: Entry)] {
+        entries(withVerdict: .pendingReview)
+    }
+
+    /// Items the user answered "not expected" about. They stay listed —
+    /// otherwise the verdict is indistinguishable from "expected", which is
+    /// what "Keep flagging" used to do: both answers simply removed the row.
+    var markedUnexpected: [(path: String, entry: Entry)] {
+        entries(withVerdict: .keepFlagging)
+    }
+
+    private func entries(withVerdict verdict: Verdict) -> [(path: String, entry: Entry)] {
         executables
-            .filter { $0.value.verdict == .pendingReview }
+            .filter { $0.value.verdict == verdict }
             .sorted {
                 $0.value.firstSeen == $1.value.firstSeen
                     ? $0.key < $1.key

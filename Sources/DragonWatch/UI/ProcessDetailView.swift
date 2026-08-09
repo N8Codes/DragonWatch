@@ -26,6 +26,8 @@ struct ProcessDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .help("Close details")
+                .accessibilityLabel("Close details for \(process.record.name)")
             }
 
             if process.trust.isSelf {
@@ -229,27 +231,38 @@ struct IntelSectionView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        case .done(let findings):
-            if findings.isEmpty {
-                Text("No intel findings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(findings) { finding in
-                        Label {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("\(finding.providerName): \(finding.summary)")
-                                    .font(.caption)
-                                Text(finding.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: symbolName(for: finding.severity))
-                                .foregroundStyle(color(for: finding.severity))
-                        }
+        case .done(let findings, let problems):
+            VStack(alignment: .leading, spacing: 3) {
+                if findings.isEmpty {
+                    Text("No intel findings.")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(findings) { finding in
+                    Label {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("\(finding.providerName): \(finding.summary)")
+                                .font(.caption)
+                            Text(finding.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: symbolName(for: finding.severity))
+                            .foregroundStyle(color(for: finding.severity))
+                    }
+                    .font(.caption)
+                }
+                // Shown alongside the findings, not instead of them: these
+                // say a source was unreachable, which is weaker evidence than
+                // anything a source that did answer reported.
+                ForEach(problems, id: \.self) { problem in
+                    HStack(spacing: 6) {
+                        Text(problem)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Retry") { intel.check(process) }
+                            .controlSize(.small)
                     }
                 }
             }

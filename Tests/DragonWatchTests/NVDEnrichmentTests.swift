@@ -46,6 +46,30 @@ final class CPEVersionRangeTests: XCTestCase {
         XCTAssertFalse(range.contains(AppVersion("1.0")!))
         XCTAssertTrue(range.contains(AppVersion("99.0")!))
     }
+
+    /// NVD really does publish bounds like `"unspecified"` and service-pack
+    /// strings. Silently skipping a bound that will not parse *removed* the
+    /// constraint, so a range bounded only by such a value matched every
+    /// version ever released and the user was told their perfectly current app
+    /// was in the affected range of an actively exploited CVE.
+    func testUnparseableBoundMatchesNothingRatherThanEverything() {
+        for bound in ["unspecified", "sr16", "-", "R2", ""] {
+            XCTAssertFalse(
+                CPEVersionRange(endExcluding: bound).contains(AppVersion("0.1")!),
+                "endExcluding: \(bound)")
+            XCTAssertFalse(
+                CPEVersionRange(startIncluding: bound).contains(AppVersion("99.0")!),
+                "startIncluding: \(bound)")
+        }
+    }
+
+    /// The guard above must not swallow ranges that are genuinely open-ended:
+    /// an absent bound is unbounded, an unparseable one is unknown.
+    func testAbsentBoundsStillMeanUnbounded() {
+        XCTAssertTrue(
+            CPEVersionRange(endExcluding: "3.0").contains(AppVersion("1.0")!),
+            "a parseable bound with the other side absent still matches")
+    }
 }
 
 final class NVDExtractionTests: XCTestCase {

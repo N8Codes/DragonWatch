@@ -3,6 +3,17 @@ import SwiftUI
 /// The DragonWatch mark: a slit-pupil dragon eye, drawn as a vector path —
 /// crisp at menu bar size and tinted with the menu bar appearance. (A dragon
 /// head silhouette was tried first; the eye reads far better at 18 px.)
+enum DragonEyeGeometry {
+    /// Control points in a 100x100 authoring space: the two corners, then the
+    /// upper and lower curve controls. Scripts/make-icon.swift redraws this
+    /// same outline for the app icon and DragonEyeGeometryTests pins the two
+    /// copies together.
+    static let corners: [(x: CGFloat, y: CGFloat)] = [(2, 50), (98, 50)]
+    static let controls: [(x: CGFloat, y: CGFloat)] = [(50, -16), (50, 116)]
+    /// Pupil as a fraction of the bounding rect.
+    static let pupil = (x: 0.34, y: 0.30, width: 0.32, height: 0.40)
+}
+
 struct DragonEyeShape: Shape {
     func path(in rect: CGRect) -> Path {
         // Control points authored in a 100×100 space, scaled to fit.
@@ -16,17 +27,24 @@ struct DragonEyeShape: Shape {
         // Full, round almond — sharp corners, deep curvature (Eye-of-Ra
         // proportions; texture and brow variants were tried and read worse
         // at menu bar size than this bold silhouette).
-        path.move(to: point(2, 50))
-        path.addQuadCurve(to: point(98, 50), control: point(50, -16))
-        path.addQuadCurve(to: point(2, 50), control: point(50, 116))
+        let corners = DragonEyeGeometry.corners
+        let controls = DragonEyeGeometry.controls
+        path.move(to: point(corners[0].x, corners[0].y))
+        path.addQuadCurve(
+            to: point(corners[1].x, corners[1].y),
+            control: point(controls[0].x, controls[0].y))
+        path.addQuadCurve(
+            to: point(corners[0].x, corners[0].y),
+            control: point(controls[1].x, controls[1].y))
         path.closeSubpath()
         // Round pupil — a circular cutout via even-odd fill.
+        let pupil = DragonEyeGeometry.pupil
         path.addEllipse(
             in: CGRect(
-                x: rect.minX + 0.34 * rect.width,
-                y: rect.minY + 0.30 * rect.height,
-                width: 0.32 * rect.width,
-                height: 0.40 * rect.height))
+                x: rect.minX + pupil.x * rect.width,
+                y: rect.minY + pupil.y * rect.height,
+                width: pupil.width * rect.width,
+                height: pupil.height * rect.height))
         return path
     }
 }

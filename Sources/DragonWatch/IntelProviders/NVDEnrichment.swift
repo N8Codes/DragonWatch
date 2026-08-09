@@ -38,6 +38,21 @@ struct CPEVersionRange: Codable, Equatable, Sendable {
 
     func contains(_ version: AppVersion) -> Bool {
         if let exact { return AppVersion(exact) == version }
+
+        // A bound that is present but unparseable is a constraint we cannot
+        // evaluate, so the range cannot be said to contain anything.
+        //
+        // Skipping it instead — which is what `flatMap` did on its own —
+        // *removed* the constraint, so a range bounded only by NVD's literal
+        // `"unspecified"` (or a service-pack string like `"sr16"`) matched
+        // every version in existence. That turns "your version is affected by
+        // an actively exploited CVE" into a claim made about software that is
+        // fine, which is the one claim this whole pipeline exists to get right.
+        for bound in [startIncluding, startExcluding, endIncluding, endExcluding] {
+            guard let bound else { continue }
+            guard AppVersion(bound) != nil else { return false }
+        }
+
         if let bound = startIncluding.flatMap(AppVersion.init), version < bound {
             return false
         }
@@ -62,8 +77,21 @@ actor NVDEnrichment {
     static let requestSpacing: Duration = .seconds(6.5)
     private static let responseByteCap = 5 << 20
 
+    /// How long a transient failure sidelines a CVE. Long enough that a flaky
+    /// network does not burn the rate limit, short enough that a menu-bar app
+    /// left running for weeks eventually gets the data.
+    private static let retryDelay: TimeInterval = 6 * 3600
+    /// Ranges are saved this often during a backfill rather than after every
+    /// CVE — a ~1,400-CVE sync used to re-encode and rewrite the whole growing
+    /// document 1,400 times.
+    private static let persistEvery = 25
+
     private var ranges: [String: [CPEVersionRange]]
-    private var failedThisSession: Set<String> = []
+    /// CVE → when it may be retried. `.distantFuture` for permanent failures
+    /// (a malformed ID is never going to start parsing), a timestamp for
+    /// transient ones. A permanent set meant one bad afternoon on a flaky
+    /// network blacklisted every KEV CVE until the app was quit.
+    private var retryAfter: [String: Date] = [:]
     private var syncing = false
     private let cacheURL: URL
 
@@ -83,31 +111,37 @@ actor NVDEnrichment {
 
     /// Fetches any CVEs not yet cached, one at a time, honoring the NVD rate
     /// limit. Safe to call repeatedly; only one sync runs at a time.
-    func syncMissing(cveIDs: [String]) async {
+    func syncMissing(cveIDs: [String], now: Date = Date()) async {
         guard !syncing else { return }
         syncing = true
-        defer { syncing = false }
+        var unsaved = 0
+        defer {
+            if unsaved > 0 { persist() }
+            syncing = false
+        }
 
         for cveID in cveIDs
-        where ranges[cveID] == nil && !failedThisSession.contains(cveID) {
+        where ranges[cveID] == nil && (retryAfter[cveID].map { now >= $0 } ?? true) {
             guard CVEID.isValid(cveID) else {
-                failedThisSession.insert(cveID)
+                retryAfter[cveID] = .distantFuture  // never going to parse
                 continue
             }
-            do {
-                let url = URL(
-                    string: "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=\(cveID)")!
-                let (data, _) = try await URLSession.shared.data(from: url)
-                guard data.count <= Self.responseByteCap else {
-                    failedThisSession.insert(cveID)
-                    continue
+            let url = URL(
+                string: "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=\(cveID)")!
+            if let data = await IntelSession.fetch(url, byteCap: Self.responseByteCap),
+                let extracted = try? Self.extractRanges(from: data)
+            {
+                ranges[cveID] = extracted
+                unsaved += 1
+                if unsaved >= Self.persistEvery {
+                    persist()
+                    unsaved = 0
                 }
-                ranges[cveID] = try Self.extractRanges(from: data)
-                persist()
-            } catch {
-                failedThisSession.insert(cveID)
+            } else {
+                retryAfter[cveID] = now.addingTimeInterval(Self.retryDelay)
             }
             try? await Task.sleep(for: Self.requestSpacing)
+            if Task.isCancelled { return }
         }
     }
 

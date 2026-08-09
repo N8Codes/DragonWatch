@@ -9,6 +9,12 @@ enum SignatureTier: String, CaseIterable, Codable, Sendable {
     case adHoc = "Ad-hoc signed"
     case unsigned = "Unsigned"
     case invalid = "Invalid signature"
+    /// Part of the macOS install, in a location only root can write and
+    /// System Integrity Protection guards, but not readable by us so the
+    /// signature could not actually be checked.
+    case osManagedUnreadable = "macOS system file (unverified)"
+    /// We cannot read the file, and it is not somewhere the OS manages.
+    case unreadable = "Cannot be read"
 }
 
 /// Context signals that can lower — never raise — a rating.
@@ -83,8 +89,6 @@ struct TrustAssessment: Sendable {
 /// applicable modifier. Signatures anchor; context can only pull downward.
 enum TrustScoring {
     static func badge(tier: SignatureTier, modifiers: [RiskModifier]) -> TrustBadge {
-        // Apple platform binaries are the OS itself; context signals are noise there.
-        if tier == .applePlatform { return .trusted }
         var badge = base(for: tier)
         for modifier in Set(modifiers) where applies(modifier, to: tier) {
             badge = demoted(badge)
@@ -94,14 +98,23 @@ enum TrustScoring {
 
     static func base(for tier: SignatureTier) -> TrustBadge {
         switch tier {
-        case .applePlatform, .appStore, .developerID: .trusted
+        case .applePlatform, .appStore, .developerID, .osManagedUnreadable: .trusted
         case .validSigned, .adHoc: .caution
-        case .unsigned, .invalid: .suspicious
+        case .unsigned, .invalid, .unreadable: .suspicious
         }
     }
 
+    /// The single source of truth for whether a context signal counts. `badge`
+    /// and `TrustExplanation` both read it, so an explanation can never list a
+    /// demotion the score did not apply — they disagreed while `badge` carried
+    /// its own early return for `.applePlatform`, and the UI showed stock
+    /// system binaries a "lowered" step above a `Trusted` result.
     static func applies(_ modifier: RiskModifier, to tier: SignatureTier) -> Bool {
-        switch modifier {
+        // Apple platform binaries are the OS itself; every context signal is
+        // noise there. Plenty of stock binaries genuinely carry them —
+        // /usr/libexec/dspluginhelperd ships with disable-library-validation.
+        guard tier != .applePlatform, tier != .osManagedUnreadable else { return false }
+        return switch modifier {
         case .suspiciousLocation:
             true
         case .quarantined:
@@ -118,9 +131,12 @@ enum TrustScoring {
             // traits are evasion and injection surface.
             !(tier == .appStore || tier == .developerID)
         case .networkActive:
-            // Only meaningful on weak signatures — trusted apps talk to the
-            // network constantly.
-            tier == .unsigned || tier == .adHoc || tier == .invalid
+            // Only meaningful when nobody identifiable is accountable for the
+            // binary — trusted apps talk to the network constantly. That set
+            // is exactly the non-trusted tiers, `.validSigned` (a self-issued
+            // certificate) included: it was the one modifier that exempted
+            // that tier while its own explanation argued for applying it.
+            base(for: tier) != .trusted
         }
     }
 

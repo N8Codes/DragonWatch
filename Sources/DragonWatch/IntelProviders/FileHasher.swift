@@ -13,15 +13,46 @@ actor FileHasher {
         if let hit = cache[path], hit.mtime == mtime {
             return hit.digest
         }
+        guard let digest = Self.sha256Data(path: path) else { return nil }
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        cache[path] = (mtime, hex)
+        return hex
+    }
+
+    /// Streams the file and returns the raw digest, or nil if the file could
+    /// not be read **in full**.
+    ///
+    /// A read error partway through must not finalize the digest. Treating a
+    /// throw as end-of-file yields the hash of a prefix: a well-formed, wrong
+    /// answer that then gets cached and sent to the malware-list and
+    /// VirusTotal lookups, where a wrong hash reads as "not known malware".
+    nonisolated static func sha256Data(path: String) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
 
+        // Each chunk must be released inside the loop. Without the pool,
+        // Foundation retains every 1 MB Data until the enclosing autorelease
+        // pool drains — which in an async actor may not happen until the whole
+        // task finishes. Measured: hashing a 300 MB binary grew RSS by 300 MB
+        // without this, and 8 MB with it.
         var hasher = SHA256()
-        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-            hasher.update(data: chunk)
+        var reachedEnd = false
+        var failed = false
+        while !reachedEnd && !failed {
+            autoreleasepool {
+                do {
+                    guard let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty
+                    else {
+                        reachedEnd = true
+                        return
+                    }
+                    hasher.update(data: chunk)
+                } catch {
+                    failed = true
+                }
+            }
         }
-        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        cache[path] = (mtime, digest)
-        return digest
+        guard !failed else { return nil }
+        return Data(hasher.finalize())
     }
 }

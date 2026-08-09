@@ -121,8 +121,8 @@ extension TrustBadge {
 
 struct MetricsView: View {
     var count: Int?
-    let cpu: Double
-    let memory: UInt64
+    let cpu: Double?
+    let memory: UInt64?
 
     var body: some View {
         // Member rows pass no count; the empty slot keeps the CPU and memory
@@ -132,14 +132,18 @@ struct MetricsView: View {
             .foregroundStyle(.tertiary)
             .frame(width: 32, alignment: .trailing)
             .help("Processes in this group")
-        Text(String(format: "%.1f%%", cpu))
+        Text(cpu.map { String(format: "%.1f%%", $0) } ?? "—")
             .font(.callout.monospacedDigit())
             .foregroundStyle(.secondary)
             .frame(width: 62, alignment: .trailing)
-            .help("CPU — one fully busy core reads 100%, so multicore work can exceed it")
+            .help(
+                cpu == nil
+                    ? "CPU unavailable — macOS does not report metrics for processes you do not own"
+                    : "CPU — one fully busy core reads 100%, so multicore work can exceed it")
         Text(
-            ByteCountFormatter.string(
-                fromByteCount: Int64(memory), countStyle: .memory)
+            memory.map {
+                ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory)
+            } ?? "—"
         )
         .font(.callout.monospacedDigit())
         .foregroundStyle(.tertiary)

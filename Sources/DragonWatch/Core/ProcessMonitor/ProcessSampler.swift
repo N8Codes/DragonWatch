@@ -5,10 +5,14 @@ struct ProcessRecord: Identifiable, Hashable, Sendable {
     let pid: pid_t
     let path: String
     let name: String
-    var cpuPercent: Double
-    var residentBytes: UInt64
+    /// nil when the kernel denied rusage — true for processes we do not own.
+    /// The process is still reported; only its metrics are unknown, and the
+    /// UI must show that rather than an implied zero.
+    var cpuPercent: Double?
+    var residentBytes: UInt64?
 
     var id: pid_t { pid }
+    var hasMetrics: Bool { cpuPercent != nil }
 }
 
 /// Enumerates all visible processes via libproc, computing CPU% from the delta
@@ -50,19 +54,30 @@ actor ProcessSampler {
             }
             let path = String(cString: pathBuffer)
 
+            // rusage is denied for processes we do not own — about 40% of a
+            // running Mac, every root daemon among them. Losing the *metrics*
+            // is unavoidable; dropping the *process* is not. Skipping the
+            // record here made root-only executables invisible to trust
+            // assessment, the baseline, and every alert rule — precisely the
+            // persistence this tool exists to notice. Report the process with
+            // metrics marked unavailable instead.
             var usage = dw_rusage_info()
-            guard dw_proc_pid_rusage(pid, &usage) == 0 else { continue }
+            let haveMetrics = dw_proc_pid_rusage(pid, &usage) == 0
 
-            let cpuTimeNs = machToNs(usage.ri_user_time &+ usage.ri_system_time)
-            currentCPUTimes[pid] = cpuTimeNs
-
-            let cpuPercent =
-                lastSampleStamp == 0
-                ? 0
-                : Self.cpuPercent(
-                    cpuTimeNs: cpuTimeNs,
-                    previousCPUTimeNs: lastCPUTimeNs[pid],
-                    wallDeltaNs: wallDeltaNs)
+            var cpuPercent: Double?
+            var residentBytes: UInt64?
+            if haveMetrics {
+                let cpuTimeNs = machToNs(usage.ri_user_time &+ usage.ri_system_time)
+                currentCPUTimes[pid] = cpuTimeNs
+                cpuPercent =
+                    lastSampleStamp == 0
+                    ? 0
+                    : Self.cpuPercent(
+                        cpuTimeNs: cpuTimeNs,
+                        previousCPUTimeNs: lastCPUTimeNs[pid],
+                        wallDeltaNs: wallDeltaNs)
+                residentBytes = usage.ri_phys_footprint
+            }
 
             records.append(
                 ProcessRecord(
@@ -70,7 +85,7 @@ actor ProcessSampler {
                     path: path,
                     name: (path as NSString).lastPathComponent,
                     cpuPercent: cpuPercent,
-                    residentBytes: usage.ri_phys_footprint
+                    residentBytes: residentBytes
                 ))
         }
 

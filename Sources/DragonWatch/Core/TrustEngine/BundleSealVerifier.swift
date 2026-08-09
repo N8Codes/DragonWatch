@@ -8,26 +8,28 @@ import Security
 /// planted. Minutes for something Xcode-sized, so it runs on demand and the
 /// verdict is cached.
 ///
-/// The cache vouches **specific binaries**, identified by (path, mtime, size)
-/// captured at verification time — never "anything inside this bundle". A
-/// file planted into a verified bundle afterwards has a path that was never
-/// vouched, so it stays flagged; a binary swapped at a vouched path has a
-/// different mtime/size, so its vouch lapses. Vouching by bundle membership
-/// would recreate exactly the hiding spot this feature exists to avoid.
+/// The cache vouches **specific binaries**, identified by path and a
+/// content-bound fingerprint captured at verification time — never "anything
+/// inside this bundle". A file planted into a verified bundle afterwards has a
+/// path that was never vouched, so it stays flagged; a binary swapped at a
+/// vouched path has different bytes, so its vouch lapses. Vouching by bundle
+/// membership would recreate exactly the hiding spot this feature exists to
+/// avoid.
+///
+/// The fingerprint is the file's bytes (cdhash, or SHA-256 when unsigned), not
+/// its mtime and size. Those are both settable by anyone who can write the
+/// file, so identifying by them meant an attacker who replaced a vouched
+/// binary could keep its vouch just by padding to the same length and calling
+/// `utimensat`.
 actor BundleSealVerifier {
     struct BinaryIdentity: Codable, Hashable, Sendable {
         let path: String
-        let mtime: Date
-        let size: Int64
+        let fingerprint: Data
 
         init?(path: String) {
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-                let mtime = attributes[.modificationDate] as? Date,
-                let size = attributes[.size] as? Int64
-            else { return nil }
+            guard let fingerprint = CodeIdentity.fingerprint(path: path) else { return nil }
             self.path = path
-            self.mtime = mtime
-            self.size = size
+            self.fingerprint = fingerprint
         }
     }
 
@@ -48,30 +50,50 @@ actor BundleSealVerifier {
             .flatMap { try? JSONDecoder().decode([String: Record].self, from: $0) } ?? [:]
     }
 
-    /// Every still-valid binary vouch: the file must be byte-identical (by
-    /// mtime and size) to what was present when its bundle was verified.
-    func validVouches() -> [String: String] {
-        var vouches: [String: String] = [:]
-        for (bundle, record) in records {
-            for binary in record.binaries
-            where BinaryIdentity(path: binary.path) == binary {
-                vouches[binary.path] = bundle
+    /// Every recorded vouch, as `path -> (vouching bundle, fingerprint at
+    /// verification time)`.
+    ///
+    /// Freshness is deliberately *not* checked here. This used to return only
+    /// the vouches whose files still matched, which made the result a snapshot
+    /// — and `TrustEngine` holds that snapshot for the life of the process, so
+    /// a file replaced after launch kept a vouch that had already lapsed. The
+    /// engine re-checks the fingerprint at assessment time instead; handing it
+    /// the fingerprint is what lets it do so.
+    ///
+    /// Sorted by bundle path so a binary vouched by two overlapping bundles
+    /// names the same one on every launch.
+    func vouches() -> [String: (bundle: String, identity: BinaryIdentity)] {
+        var result: [String: (bundle: String, identity: BinaryIdentity)] = [:]
+        for (bundle, record) in records.sorted(by: { $0.key < $1.key }) {
+            for binary in record.binaries {
+                result[binary.path] = (bundle, binary)
             }
         }
-        return vouches
+        return result
     }
 
     /// Verifies the bundle's seal and, on success, vouches exactly the
     /// binaries named by the caller (the flagged executables the user is
     /// resolving). Returns whether verification passed.
     func verify(bundlePath: String, vouching binaryPaths: [String]) async -> Bool {
+        // Pin the identities *before* validation and confirm them after.
+        // Validating a large bundle takes minutes, and recording identities
+        // only on the way out would vouch whatever is on disk when it
+        // finishes: replace a helper mid-run and the validator's pass — made
+        // against the original bytes — is applied to the replacement.
+        let before = binaryPaths.compactMap(BinaryIdentity.init(path:))
         guard await Self.runFullValidation(bundlePath: bundlePath) else { return false }
-        var identities = Set(records[bundlePath]?.binaries ?? [])
-        // Drop stale identities for the same paths, then record current ones.
-        identities = identities.filter { !binaryPaths.contains($0.path) }
-        identities.formUnion(binaryPaths.compactMap(BinaryIdentity.init(path:)))
+        let after = Set(binaryPaths.compactMap(BinaryIdentity.init(path:)))
+        let unchanged = before.filter(after.contains)
+
+        let vouchedPaths = Set(unchanged.map(\.path))
+        var identities = (records[bundlePath]?.binaries ?? []).filter {
+            !vouchedPaths.contains($0.path)
+        }
+        identities.append(contentsOf: unchanged)
         records[bundlePath] = Record(
-            bundlePath: bundlePath, verifiedAt: Date(), binaries: Array(identities))
+            bundlePath: bundlePath, verifiedAt: Date(),
+            binaries: identities.sorted { $0.path < $1.path })
         persist()
         return true
     }

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Every alert the watcher has raised, newest first.
 struct AlertHistoryView: View {
+    @Environment(AppModel.self) private var model
     let alerts: AlertCenter
 
     var body: some View {
@@ -21,8 +22,12 @@ struct AlertHistoryView: View {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Spacer()
-                            Button("Clear") { alerts.clearHistory() }
+                            // Through the model, not the AlertCenter: the
+                            // durable copy has to go too, or "Clear" undoes
+                            // itself on the next launch.
+                            Button("Clear") { model.clearAlertHistory() }
                                 .controlSize(.regular)
+                                .accessibilityLabel("Clear alert history")
                         }
                         ForEach(alerts.history) { event in
                             row(event)

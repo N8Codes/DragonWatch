@@ -57,6 +57,7 @@ struct VirusTotalProvider: IntelProvider {
     /// not also leave that record on disk. Nothing needs HTTP caching here;
     /// results are held in memory for the session.
     private static let session = URLSession(configuration: .ephemeral)
+    private static let responseByteCap = 1 << 20
 
     func findings(for subject: IntelSubject) async throws -> [IntelFinding] {
         guard !apiKey.isEmpty else { throw LookupError.missingKey }
@@ -66,6 +67,11 @@ struct VirusTotalProvider: IntelProvider {
             url: URL(string: "https://www.virustotal.com/api/v3/files/\(hash)")!)
         request.setValue(apiKey, forHTTPHeaderField: "x-apikey")
         let (data, response) = try await Self.session.data(for: request)
+        // A file report is a few KB. Every other provider caps its response;
+        // this one buffered whatever the endpoint chose to send.
+        guard data.count <= Self.responseByteCap else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
 
         switch (response as? HTTPURLResponse)?.statusCode {
         case 404:

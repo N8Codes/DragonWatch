@@ -15,7 +15,7 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity)
 
             Text(
-                "A read-only window into what's running on your Mac, rated with macOS's own security signals. No data about your machine is sent anywhere: with the popover closed it makes no network requests at all, and the threat-intel providers that can send anything are off until you turn them on."
+                "A read-only window into what's running on your Mac, rated with macOS's own security signals. No data about your machine is sent anywhere. As it ships, every threat-intel provider is off and the only network request DragonWatch makes is a latency check while this popover is open. Turning a provider on lets it download public threat lists in the background; only VirusTotal sends anything of yours, and only a file's hash."
             )
             .font(.callout)
             .foregroundStyle(.secondary)

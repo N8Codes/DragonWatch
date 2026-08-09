@@ -64,6 +64,11 @@ actor KEVProvider: IntelProvider {
     private static let feedByteCap = 20 << 20
 
     private var catalog: KEVCatalog?
+    /// When the in-memory catalog was obtained. Freshness used to be inferred
+    /// from the cache file's mtime, so a silently failed write (disk full, or
+    /// a directory we cannot write) left the catalog permanently "stale" and
+    /// re-downloaded the whole feed on every single intel check.
+    private var catalogFetchedAt: Date?
     private let cacheURL: URL
     private let nvd: NVDEnrichment
 
@@ -129,22 +134,26 @@ actor KEVProvider: IntelProvider {
     }
 
     private func loadCatalog() async throws -> KEVCatalog {
-        if let catalog, !cacheIsStale() { return catalog }
-        if let cached = decodeCache(), !cacheIsStale() {
+        // Staleness first, decoding second. Reversed, every check on a stale
+        // in-memory catalog read and JSON-decoded the whole ~1.5 MB cache file
+        // purely to discard the result.
+        if let catalog, !memoryCatalogIsStale() { return catalog }
+        if !cacheFileIsStale(), let cached = decodeCache() {
             startVersionSync(for: cached)
             catalog = cached
+            catalogFetchedAt = Date()
             return cached
         }
         do {
-            let (data, _) = try await URLSession.shared.data(from: Self.feedURL)
-            guard data.count <= Self.feedByteCap else {
-                throw URLError(.dataLengthExceedsMaximum)
-            }
+            guard
+                let data = await IntelSession.fetch(Self.feedURL, byteCap: Self.feedByteCap)
+            else { throw URLError(.badServerResponse) }
             let decoded = try JSONDecoder().decode(KEVCatalog.self, from: data)
             let fresh = KEVCatalog(
                 catalogVersion: decoded.catalogVersion,
                 vulnerabilities: KEVCatalog.validated(decoded.vulnerabilities))
             catalog = fresh
+            catalogFetchedAt = Date()
             if let encoded = try? JSONEncoder().encode(fresh) {
                 try? AppSupport.writePrivately(encoded, to: cacheURL)
             }
@@ -155,6 +164,7 @@ actor KEVProvider: IntelProvider {
             // stale cache rather than wiping intel for the day.
             if let cached = decodeCache() {
                 catalog = cached
+                catalogFetchedAt = Date()
                 startVersionSync(for: cached)
                 return cached
             }
@@ -172,7 +182,12 @@ actor KEVProvider: IntelProvider {
         Task { await nvd.syncMissing(cveIDs: ids) }
     }
 
-    private func cacheIsStale() -> Bool {
+    private func memoryCatalogIsStale() -> Bool {
+        guard let catalogFetchedAt else { return true }
+        return Date().timeIntervalSince(catalogFetchedAt) > Self.refreshInterval
+    }
+
+    private func cacheFileIsStale() -> Bool {
         guard
             let mtime =
                 (try? FileManager.default

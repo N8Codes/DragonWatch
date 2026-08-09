@@ -54,21 +54,63 @@ final class ThroughputRateTests: XCTestCase {
 
     func testSimpleRate() {
         let rate = ThroughputSampler.rate(
-            current: (rx: 3_000_000, tx: 500_000),
-            previous: (rx: 1_000_000, tx: 250_000),
+            current: ["en0": (rx: 3_000_000, tx: 500_000)],
+            previous: ["en0": (rx: 1_000_000, tx: 250_000)],
             seconds: 2)
         XCTAssertEqual(rate.rxPerSec, 1_000_000, accuracy: 0.1)
         XCTAssertEqual(rate.txPerSec, 125_000, accuracy: 0.1)
     }
 
-    /// Interface byte counters are UInt32 and wrap every ~4 GB — the delta
-    /// must wrap too, not trap or produce garbage.
-    func testCounterWrapProducesSaneRate() {
+    func testTrafficIsSummedAcrossInterfaces() {
         let rate = ThroughputSampler.rate(
-            current: (rx: 1000, tx: 0),
-            previous: (rx: UInt32.max - 999, tx: 0),
+            current: ["en0": (rx: 300, tx: 30), "en1": (rx: 700, tx: 70)],
+            previous: ["en0": (rx: 100, tx: 10), "en1": (rx: 200, tx: 20)],
             seconds: 1)
-        XCTAssertEqual(rate.rxPerSec, 2000, accuracy: 0.1)
+        XCTAssertEqual(rate.rxPerSec, 700, accuracy: 0.1)
+        XCTAssertEqual(rate.txPerSec, 70, accuracy: 0.1)
+    }
+
+    /// A VPN coming up mid-session brings a counter holding its whole
+    /// lifetime. With the totals summed before differencing, that entire
+    /// figure landed in one tick and the readout claimed hundreds of MB/s.
+    func testAnInterfaceAppearingContributesNothingUntilItHasABaseline() {
+        let previous = ["en0": (rx: UInt32(1000), tx: UInt32(100))]
+        let appeared = [
+            "en0": (rx: UInt32(1200), tx: UInt32(120)),
+            "utun4": (rx: UInt32(900_000_000), tx: UInt32(900_000_000)),
+        ]
+        let rate = ThroughputSampler.rate(
+            current: appeared, previous: previous, seconds: 1)
+        XCTAssertEqual(rate.rxPerSec, 200, accuracy: 0.1, "only en0's real delta counts")
+        XCTAssertEqual(rate.txPerSec, 20, accuracy: 0.1)
+
+        // On the following tick it has a baseline and counts normally.
+        let next = ThroughputSampler.rate(
+            current: ["en0": (rx: 1200, tx: 120), "utun4": (rx: 900_000_500, tx: 900_000_000)],
+            previous: appeared, seconds: 1)
+        XCTAssertEqual(next.rxPerSec, 500, accuracy: 0.1)
+    }
+
+    func testAnInterfaceDisappearingDoesNotProduceANegativeOrHugeRate() {
+        let rate = ThroughputSampler.rate(
+            current: ["en0": (rx: 1200, tx: 120)],
+            previous: ["en0": (rx: 1000, tx: 100), "utun4": (rx: 5_000_000, tx: 5_000_000)],
+            seconds: 1)
+        XCTAssertEqual(rate.rxPerSec, 200, accuracy: 0.1)
+        XCTAssertEqual(rate.txPerSec, 20, accuracy: 0.1)
+    }
+
+    /// A counter that went backwards is either a `UInt32` wrap or an interface
+    /// recreated under the same name (a VPN reconnecting). They cannot be told
+    /// apart from the counter, so the sample is skipped — a momentarily low
+    /// reading beats inventing a multi-gigabyte spike.
+    func testABackwardsCounterIsSkippedNotWrapped() {
+        let rate = ThroughputSampler.rate(
+            current: ["utun4": (rx: 1000, tx: 0)],
+            previous: ["utun4": (rx: UInt32.max - 999, tx: 0)],
+            seconds: 1)
+        XCTAssertEqual(rate.rxPerSec, 0, accuracy: 0.1)
+        XCTAssertGreaterThanOrEqual(rate.rxPerSec, 0, "a rate is never negative")
     }
 }
 

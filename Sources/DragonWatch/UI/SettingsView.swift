@@ -120,6 +120,7 @@ private struct HistorySettingsSection: View {
             .pickerStyle(.segmented)
             .controlSize(.small)
             .labelsHidden()
+            .accessibilityLabel("Keep alerts for")
         }
         Button("Export History…", action: export)
             .controlSize(.small)
@@ -190,12 +191,16 @@ private struct WatcherSettingsSection: View {
         .pickerStyle(.segmented)
         .controlSize(.small)
         .labelsHidden()
+        .accessibilityLabel("Background refresh interval")
 
         HStack(spacing: 8) {
             Text("CPU alert above")
                 .font(.caption)
             Slider(value: $settings.cpuThresholdPercent, in: 50...100, step: 5)
                 .controlSize(.small)
+                .accessibilityLabel("CPU alert threshold")
+                .accessibilityValue(
+                    String(format: "%.0f percent", settings.cpuThresholdPercent))
             Text(String(format: "%.0f%%", settings.cpuThresholdPercent))
                 .font(.caption.monospacedDigit())
                 .frame(width: 36, alignment: .trailing)

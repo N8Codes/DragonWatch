@@ -25,7 +25,8 @@ final class SystemProbeTests: XCTestCase {
             "reported path must exist on disk: \(me.path)")
         XCTAssertTrue(me.path.hasSuffix("xctest"), "should be the test runner binary")
         XCTAssertEqual(me.name, (me.path as NSString).lastPathComponent)
-        XCTAssertGreaterThan(me.residentBytes, 1 << 20, "resident size should exceed 1 MB")
+        XCTAssertGreaterThan(
+            try XCTUnwrap(me.residentBytes), 1 << 20, "resident size should exceed 1 MB")
     }
 
     /// Smoke test for the mach-timebase conversion against a real workload —
@@ -49,10 +50,27 @@ final class SystemProbeTests: XCTestCase {
         let records = await sampler.sample()
         let me = records.first { $0.pid == getpid() }
         let sample = try XCTUnwrap(me)
-        XCTAssertGreaterThan(sample.cpuPercent, 1, "busy loop should register at all")
+        let cpu = try XCTUnwrap(sample.cpuPercent, "we own this process, so rusage must succeed")
+        XCTAssertGreaterThan(cpu, 1, "busy loop should register at all")
         XCTAssertLessThan(
-            sample.cpuPercent, Double(ProcessInfo.processInfo.activeProcessorCount) * 150,
+            cpu, Double(ProcessInfo.processInfo.activeProcessorCount) * 150,
             "CPU% far above core count implies a unit-conversion bug")
+    }
+
+    /// Processes we do not own are reported with unknown metrics, never
+    /// dropped. Skipping them made ~40% of a running Mac — every root-only
+    /// daemon, including the persistence this tool exists to notice —
+    /// invisible to trust assessment and every alert rule.
+    func testProcessesWeDoNotOwnAreStillReported() async {
+        let records = await ProcessSampler().sample()
+        let withoutMetrics = records.filter { !$0.hasMetrics }
+        XCTAssertFalse(
+            withoutMetrics.isEmpty,
+            "a real Mac runs root daemons whose rusage we cannot read; if none "
+                + "appear here the sampler is dropping them again")
+        XCTAssertTrue(
+            withoutMetrics.allSatisfy { !$0.path.isEmpty && $0.pid > 0 },
+            "a metric-less record must still carry the identity trust needs")
     }
 
     func testAppleBinaryRatesAsApplePlatform() async {

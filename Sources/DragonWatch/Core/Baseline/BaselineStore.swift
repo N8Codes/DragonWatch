@@ -17,12 +17,23 @@ actor BaselineStore {
     init(directory: URL? = nil) {
         let dir = AppSupport.directory(override: directory)
         fileURL = dir.appendingPathComponent("baseline.json")
-        if let data = try? Data(contentsOf: fileURL),
-            let loaded = try? JSONDecoder().decode(BaselineLedger.self, from: data)
+        let data = try? Data(contentsOf: fileURL)
+        if let data,
+            let loaded = try? JSONDecoder().decode(BaselineLedger.self, from: data),
+            loaded.effectiveSchemaVersion == BaselineLedger.currentSchemaVersion
         {
             ledger = loaded
             seeding = false
         } else {
+            if data != nil {
+                // A file exists but we cannot read it: every verdict the user
+                // recorded is in there. Move it aside rather than let the next
+                // save overwrite it, and re-seed so they are asked afresh
+                // instead of being alerted about their whole machine at once.
+                let backup = fileURL.appendingPathExtension("bak")
+                try? FileManager.default.removeItem(at: backup)
+                try? FileManager.default.moveItem(at: fileURL, to: backup)
+            }
             ledger = BaselineLedger()
             seeding = true
         }
@@ -36,8 +47,13 @@ actor BaselineStore {
             observations[item.path] = ledger.observe(
                 path: item.path, assessment: item.assessment, now: now)
         }
-        let wasSeeding = seeding
-        seeding = false
+        // An empty batch must not consume the seeding pass. If the very first
+        // sample comes back empty — sampling raced the launch, or the process
+        // list was momentarily unreadable — marking it as seeded means the
+        // next batch is treated as news and the user is notified about every
+        // program on their Mac at once.
+        let wasSeeding = seeding && !items.isEmpty
+        if wasSeeding { seeding = false }
         if observations.values.contains(where: { $0 != .known }) || wasSeeding {
             persist()
         }
@@ -59,6 +75,10 @@ actor BaselineStore {
 
     func pendingReview() -> [(path: String, entry: BaselineLedger.Entry)] {
         ledger.pendingReview
+    }
+
+    func markedUnexpected() -> [(path: String, entry: BaselineLedger.Entry)] {
+        ledger.markedUnexpected
     }
 
     /// "Reset baseline": wipe the ledger and re-run the reviewed first-run

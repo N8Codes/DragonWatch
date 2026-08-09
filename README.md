@@ -2,18 +2,11 @@
 
 **A lightweight macOS process trust monitor.**
 
-> **Beta — read this first.**
->
-> The trust engine, scoring rules, and storage are covered by unit tests, and
-> the app has been run and profiled on real hardware. What has **not** been
-> exercised end to end is the alert pipeline: new-process, persistence,
-> replaced-binary, and known-malware notifications have passing unit tests but
-> have not been confirmed firing on a live machine.
->
-> So: trust what you see in the window, and treat a *missing* notification as
-> unproven rather than impossible. Do not rely on DragonWatch as your only
-> signal that something changed. Please open an issue if an alert does not
-> fire — that is the most useful bug report you can send right now.
+> **Beta.** Three alert paths are confirmed firing on real hardware (new
+> unsigned process, new LaunchAgent, replaced binary). The known-malware,
+> invalid-signature, sustained-CPU and network-change alerts are unit-tested
+> but unproven live. Tested by one person on one Mac — treat a *missing*
+> notification as unproven, not impossible.
 
 DragonWatch lives in your menu bar behind a dragon-eye icon. Open it and you see
 every app and process running on your Mac, grouped the way you think about
@@ -33,18 +26,17 @@ an orange or red warning badge when something deserves a look.
 
 ## What it is (and isn't)
 
-DragonWatch makes your machine's state **visible and legible**. It is
-**not an antivirus** — macOS already runs XProtect and Gatekeeper underneath.
-DragonWatch is read-only and needs no elevated privileges: it never stops,
-kills, quarantines, or modifies another program. The only things it acts on
-are its own — quitting a leftover copy of itself at launch, and its own files
-in Application Support. No data about your machine is sent anywhere. Its only
-network traffic is a tiny latency probe — Apple's captive-portal URL, once a
-minute and **only while the popover is open** — plus the strictly opt-in intel
-checks below. With the popover closed and intel off, it makes no network
-requests at all. (MalwareBazaar is the one provider that refreshes in the
-background once enabled — it downloads a public list on a weekly/daily
-cadence and sends nothing about your machine.)
+Makes your machine's state **visible and legible**. It is **not an antivirus** —
+macOS already runs XProtect and Gatekeeper underneath.
+
+- **Read-only.** Never stops, kills, quarantines, or modifies another program,
+  and never asks for elevated privileges.
+- **Quiet.** With intel off — how it ships — the only network request is a
+  latency probe to Apple's captive-portal URL, once a minute and only while
+  the popover is open. Enabling a provider adds background downloads of public
+  threat lists.
+- **Private.** No data about your machine is sent anywhere. Opt-in intel is the
+  only exception, and each provider says exactly what it sends.
 
 ## How trust is determined
 
@@ -91,26 +83,18 @@ disk on a routine tick.
 
 ## Background watcher
 
-DragonWatch keeps watching while the popover is closed (at a slower cadence)
-and posts a notification when something noteworthy changes: a new non-trusted
-process, a new LaunchAgent/LaunchDaemon, an invalid signature, a sustained CPU
-spike, or a network drop. What counts as "new" comes from a **baseline
-ledger** — a reviewed record of what is normal on this machine. On first run,
-anything not clearly trusted is shown for your verdict ("expected" /
-"keep flagging") before being accepted as normal, and each question is asked
-exactly once. Per-rule cooldowns keep a flapping condition from becoming a
-notification storm.
+Watches while the popover is closed and notifies you when something changes: a
+new non-trusted process, a new LaunchAgent/LaunchDaemon, an invalid signature,
+a binary replaced in place, a sustained CPU spike, a network drop.
 
-Settings let you tune the background cadence and CPU threshold, switch
-individual alert rules off, and reset the baseline after a big legitimate
-change (like installing a batch of new software).
-
-DragonWatch also keeps its own **observation history**, locally: when each
-binary first appeared, its hash, and any signature changes — so a binary
-quietly replaced in place with a weaker signature raises an alert, and each
-process's detail view can answer "when did this show up, and has it
-changed?". Alert history survives restarts, honors a retention setting, is
-stored owner-only, and can be exported as JSON.
+- **Baseline ledger** decides what counts as "new". On first run anything not
+  clearly trusted is shown for your verdict — asked once, remembered forever.
+- **Observation history** records when each binary first appeared, its hash,
+  and any signature change. Binaries are hashed a few per tick and re-hashed
+  when the file changes on disk, so a replacement is noticed. Survives
+  restarts, owner-only, exportable as JSON.
+- **Settings** tune cadence and CPU threshold, switch individual rules off, and
+  reset the baseline after installing a batch of software.
 
 ## Opt-in threat intel
 

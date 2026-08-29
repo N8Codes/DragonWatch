@@ -6,6 +6,8 @@ struct ProcessDetailView: View {
     let dismiss: () -> Void
     @Environment(AppModel.self) private var model
     @State private var identity: ObservationLedger.Identity?
+    @State private var keg: HomebrewKeg?
+    @State private var currentParent: String?
     @State private var enclosingBundle: String?
     @State private var showCriteria = false
 
@@ -54,10 +56,30 @@ struct ProcessDetailView: View {
                 row("Identifier", signingID)
             }
             row("Path", process.record.path)
+            if let keg {
+                row("Origin", keg.summary)
+            }
             if let identity {
                 row(
                     "First seen",
                     identity.firstSeen.formatted(date: .abbreviated, time: .shortened))
+                // The ledger keeps the *first* launch — the one the alert was
+                // about. The live parent can differ (and pids get reused), so
+                // the two are labelled apart.
+                if let launch = identity.launchedBy {
+                    row("First launch", launchDescription(launch))
+                    if let chain = launch.ancestryDescription {
+                        row("Ancestry", chain)
+                    }
+                    if let agent = launch.agentSession {
+                        Label(
+                            "Started inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you, launched it",
+                            systemImage: "sparkles"
+                        )
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if let hash = identity.sha256 {
                     row("SHA-256", hash)
                 }
@@ -67,6 +89,9 @@ struct ProcessDetailView: View {
                         "\(change.field) on \(change.date.formatted(date: .abbreviated, time: .omitted))"
                     )
                 }
+            }
+            if let parent = currentParent {
+                row("Parent now", parent)
             }
 
             whySection
@@ -84,10 +109,29 @@ struct ProcessDetailView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: process.record.pid) {
-            identity = await model.observation(for: process.record.path)
-            enclosingBundle = await model.strongEnclosingBundle(
-                for: process.record.path)
+            let path = process.record.path
+            identity = await model.observation(for: path)
+            keg = await Task.detached { HomebrewKeg.locate(path: path) }.value
+            currentParent = process.record.parentPID.map { ppid in
+                let name = ProcessSampler.path(forPID: ppid).map {
+                    ($0 as NSString).lastPathComponent
+                }
+                return "\(name ?? "exited process") (pid \(ppid))"
+            }
+            enclosingBundle = await model.strongEnclosingBundle(for: path)
         }
+    }
+
+    /// "zsh (pid 7083) — /bin/zsh, started 28 Aug 2026 at 17:31".
+    private func launchDescription(_ launch: LaunchContext) -> String {
+        var text = launch.summary
+        if let parentPath = launch.parentPath {
+            text += " — \(parentPath)"
+        }
+        if let started = launch.startedAt {
+            text += ", started \(started.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return text
     }
 
     /// The transparency panel: why this badge, step by step, in the order

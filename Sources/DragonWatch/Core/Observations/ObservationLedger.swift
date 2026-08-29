@@ -32,13 +32,16 @@ struct ObservationLedger: Codable, Sendable {
         /// starved every other binary behind it.
         var hashAttemptedAt: Date?
         var transitions: [Transition] = []
+        /// Who started it, the first time it was seen. Optional so ledgers
+        /// written before this field existed still decode.
+        var launchedBy: LaunchContext?
     }
 
     /// How long before another attempt at a path whose last one did not settle
     /// the question.
     static let hashRetryInterval: TimeInterval = 3600
 
-    struct Event: Codable, Sendable {
+    struct Event: Codable, Equatable, Sendable {
         let date: Date
         let kind: String
         let title: String
@@ -78,9 +81,15 @@ struct ObservationLedger: Codable, Sendable {
     var identities: [String: Identity] = [:]
     var events: [Event] = []
 
-    mutating func observe(path: String, tier: SignatureTier, now: Date) -> Sighting {
+    /// `launch` is recorded only on the first sighting: the parent that
+    /// started the process the alert was about is the one worth keeping.
+    mutating func observe(
+        path: String, tier: SignatureTier, now: Date, launch: LaunchContext? = nil
+    ) -> Sighting {
         guard var identity = identities[path] else {
-            identities[path] = Identity(firstSeen: now, lastSeen: now, tier: tier)
+            var identity = Identity(firstSeen: now, lastSeen: now, tier: tier)
+            identity.launchedBy = launch
+            identities[path] = identity
             return .new
         }
         identity.lastSeen = now
@@ -128,6 +137,15 @@ struct ObservationLedger: Codable, Sendable {
 
     mutating func record(event: Event) {
         events.append(event)
+    }
+
+    /// Removes exactly this event. Returns whether anything was removed, so
+    /// a caller can skip the disk write when the ledger already lacked it.
+    @discardableResult
+    mutating func remove(event: Event) -> Bool {
+        let before = events.count
+        events.removeAll { $0 == event }
+        return events.count != before
     }
 
     /// Candidates for the rate-limited hashing queue, in the caller's order.

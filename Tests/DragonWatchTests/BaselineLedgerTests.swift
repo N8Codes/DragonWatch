@@ -3,6 +3,36 @@ import XCTest
 @testable import DragonWatch
 
 final class BaselineLedgerTests: XCTestCase {
+
+    /// "Ignore" is the third answer: gone from both lists, never asked again,
+    /// and recorded as *not* vouched for.
+    func testIgnoredLeavesBothListsAndStaysKnown() {
+        var ledger = BaselineLedger()
+        let adHoc = assessment(tier: .adHoc)
+        XCTAssertEqual(ledger.observe(path: "/x", assessment: adHoc, now: now), .addedForReview)
+        ledger.recordVerdict(path: "/x", verdict: .ignored)
+        XCTAssertTrue(ledger.pendingReview.isEmpty)
+        XCTAssertTrue(ledger.markedUnexpected.isEmpty)
+        XCTAssertEqual(ledger.executables["/x"]?.verdict, .ignored)
+        XCTAssertEqual(
+            ledger.observe(path: "/x", assessment: adHoc, now: now.addingTimeInterval(60)),
+            .known, "an ignored item must not be re-asked or re-alerted")
+    }
+
+    func testIgnoredVerdictRoundTripsAndOldFilesDecode() throws {
+        var ledger = BaselineLedger()
+        _ = ledger.observe(path: "/x", assessment: assessment(tier: .unsigned), now: now)
+        ledger.recordVerdict(path: "/x", verdict: .ignored)
+        let data = try JSONEncoder().encode(ledger)
+        XCTAssertEqual(
+            try JSONDecoder().decode(BaselineLedger.self, from: data).executables["/x"]?.verdict,
+            .ignored)
+        let old =
+            #"{"executables":{"/y":{"tier":"Unsigned","verdict":"expected","firstSeen":0}},"persistenceItems":[]}"#
+        XCTAssertEqual(
+            try JSONDecoder().decode(BaselineLedger.self, from: Data(old.utf8)).executables["/y"]?
+                .verdict, .expected)
+    }
     private let now = Date(timeIntervalSinceReferenceDate: 0)
 
     private func assessment(

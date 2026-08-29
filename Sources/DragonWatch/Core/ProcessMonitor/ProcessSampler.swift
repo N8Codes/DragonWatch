@@ -10,6 +10,10 @@ struct ProcessRecord: Identifiable, Hashable, Sendable {
     /// UI must show that rather than an implied zero.
     var cpuPercent: Double?
     var residentBytes: UInt64?
+    /// nil when the kernel withheld the BSD info record. Never 0: pid 0 is
+    /// the kernel, and "launched by kernel_task" is a claim, not an unknown.
+    var parentPID: pid_t?
+    var startedAt: Date?
 
     var id: pid_t { pid }
     var hasMetrics: Bool { cpuPercent != nil }
@@ -79,13 +83,22 @@ actor ProcessSampler {
                 residentBytes = usage.ri_phys_footprint
             }
 
+            // Parentage and start time come from the KERN_PROC sysctl, which
+            // answers for every process, root daemons included — unlike
+            // rusage above and unlike proc_pidinfo's BSD-info flavor.
+            var parentPID: pid_t = 0
+            var startEpoch: Double = 0
+            let haveParent = dw_proc_parent(pid, &parentPID, &startEpoch) == 0
+
             records.append(
                 ProcessRecord(
                     pid: pid,
                     path: path,
                     name: (path as NSString).lastPathComponent,
                     cpuPercent: cpuPercent,
-                    residentBytes: residentBytes
+                    residentBytes: residentBytes,
+                    parentPID: haveParent ? parentPID : nil,
+                    startedAt: haveParent ? Date(timeIntervalSince1970: startEpoch) : nil
                 ))
         }
 
@@ -104,6 +117,15 @@ actor ProcessSampler {
         guard wallDeltaNs > 0, let previous = previousCPUTimeNs, cpuTimeNs >= previous
         else { return 0 }
         return Double(cpuTimeNs - previous) / Double(wallDeltaNs) * 100.0
+    }
+
+    /// Executable path of a process that may not be in the current sample —
+    /// a parent that exited between the listing and the lookup, typically.
+    nonisolated static func path(forPID pid: pid_t) -> String? {
+        guard pid > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return String(cString: buffer)
     }
 
     private func machToNs(_ machTime: UInt64) -> UInt64 {

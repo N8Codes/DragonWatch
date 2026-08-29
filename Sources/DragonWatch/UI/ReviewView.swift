@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The reviewed sweep: each non-trusted item gets an explicit verdict before
-/// being accepted as normal — asked exactly once. Items answered "not
-/// expected" stay listed below, because an answer with no visible consequence
-/// is indistinguishable from no answer at all.
+/// The reviewed sweep: each non-trusted item is asked about exactly once.
+/// "Expected" accepts it as normal; "Not expected" keeps it listed below,
+/// because an answer with no visible consequence is indistinguishable from no
+/// answer at all; "Ignore" hides it without vouching for it.
 struct ReviewView: View {
     @Environment(AppModel.self) private var model
 
@@ -24,7 +24,7 @@ struct ReviewView: View {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         if !model.pendingReview.isEmpty {
                             Text(
-                                "Are these expected on this Mac? \"Expected\" accepts it as normal and stops the question. \"Not expected\" keeps it listed below as one you have flagged."
+                                "Are these expected on this Mac? \"Expected\" accepts it as normal and stops the question. \"Not expected\" keeps it listed below as one you have flagged. The eye-slash ignores it: hidden for good, no verdict either way."
                             )
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -79,6 +79,18 @@ struct ReviewView: View {
                     answered
                         ? "Change \(item.name) to expected"
                         : "Mark \(item.name) as not expected")
+                // The third answer: "stop asking". Hides the row for good
+                // without vouching for the binary.
+                Button {
+                    model.ignoreReview(path: item.path)
+                } label: {
+                    Image(systemName: "eye.slash")
+                }
+                .controlSize(.regular)
+                .help(
+                    "Ignore — hide this item without a verdict. It won't alert again; nothing vouches for it."
+                )
+                .accessibilityLabel("Ignore \(item.name)")
             }
             Text(item.path)
                 .font(.caption.monospaced())
@@ -93,6 +105,29 @@ struct ReviewView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // So does the evidence: who started it, and whether a package
+            // manager put it here, are what "expected" actually turns on.
+            if let launch = item.launchedBy {
+                Label("Launched by \(launch.summary)", systemImage: "arrow.turn.down.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(
+                        launch.ancestryDescription ?? launch.parentPath ?? "parent already exited")
+                if let agent = launch.agentSession {
+                    Label(
+                        "Started inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you",
+                        systemImage: "sparkles"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let keg = item.keg {
+                Label(keg.summary, systemImage: "shippingbox")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

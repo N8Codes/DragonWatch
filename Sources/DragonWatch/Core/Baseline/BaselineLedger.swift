@@ -23,6 +23,10 @@ struct BaselineLedger: Codable, Sendable {
         case expected  // user reviewed and accepted
         case keepFlagging  // user reviewed and wants it to stay flagged
         case pendingReview  // awaiting the user's verdict
+        /// User declined to answer. Hidden from both lists and never asked
+        /// or alerted again — but nothing vouches for it, which is what
+        /// separates it from `expected` in the ledger.
+        case ignored
     }
 
     struct Entry: Codable, Sendable {

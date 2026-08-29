@@ -38,14 +38,14 @@ actor ObservationStore {
     }
 
     func observeBatch(
-        _ items: [(path: String, tier: SignatureTier)],
+        _ items: [(path: String, tier: SignatureTier, launch: LaunchContext?)],
         now: Date,
         eventRetention: TimeInterval
     ) -> [String: ObservationLedger.Sighting] {
         var sightings: [String: ObservationLedger.Sighting] = [:]
         for item in items {
             sightings[item.path] = ledger.observe(
-                path: item.path, tier: item.tier, now: now)
+                path: item.path, tier: item.tier, now: now, launch: item.launch)
         }
         ledger.prune(now: now, eventRetention: eventRetention)
         if sightings.values.contains(where: { $0 != .known }) {
@@ -77,6 +77,14 @@ actor ObservationStore {
     func record(event: ObservationLedger.Event) {
         ledger.record(event: event)
         persist(now: event.date)
+    }
+
+    /// Dismissing one alert has to reach disk for the same reason clearing
+    /// them all does — the next launch re-seeds the list from here.
+    func remove(event: ObservationLedger.Event, now: Date = Date()) {
+        if ledger.remove(event: event) {
+            persist(now: now)
+        }
     }
 
     func pathsNeedingHash(among paths: [String], limit: Int, now: Date = Date())

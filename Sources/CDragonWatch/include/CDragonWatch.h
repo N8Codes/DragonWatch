@@ -18,6 +18,25 @@ static inline int dw_proc_pid_rusage(pid_t pid, dw_rusage_info *ri) {
     return proc_pid_rusage(pid, RUSAGE_INFO_V4, (rusage_info_t *)ri);
 }
 
+/* Parent pid and start time (Unix epoch seconds) of a process, via the
+   KERN_PROC sysctl that `ps` uses — unprivileged for every process, unlike
+   proc_pidinfo(PROC_PIDTBSDINFO), which the kernel refuses for other users'
+   processes (measured: 0 of ~300 root daemons answered). Returns 0 on
+   success, -1 when the process is gone — callers treat that as "unknown",
+   never as pid 0. */
+static inline int dw_proc_parent(pid_t pid, pid_t *ppid, double *start_epoch) {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) return -1;
+    /* An unknown pid succeeds with zero bytes written. */
+    if (size < sizeof(info) || info.kp_proc.p_pid != pid) return -1;
+    *ppid = info.kp_eproc.e_ppid;
+    *start_epoch = (double)info.kp_proc.p_starttime.tv_sec
+                 + (double)info.kp_proc.p_starttime.tv_usec / 1e6;
+    return 0;
+}
+
 /* 1 if the process holds at least one established TCP connection, else 0.
    Any error reads as 0 — absence of evidence must not look suspicious. */
 static inline int dw_has_active_network(pid_t pid) {

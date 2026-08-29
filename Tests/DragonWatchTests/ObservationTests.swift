@@ -165,7 +165,7 @@ final class ObservationStoreTests: XCTestCase {
     func testLedgerSurvivesReload() async {
         let store = ObservationStore(directory: directory)
         _ = await store.observeBatch(
-            [("/a", .adHoc)], now: now, eventRetention: 90 * 86400)
+            [("/a", .adHoc, nil)], now: now, eventRetention: 90 * 86400)
         await store.record(
             event: .init(date: now, kind: "sustainedCPU", title: "t", detail: "d"))
 
@@ -179,7 +179,7 @@ final class ObservationStoreTests: XCTestCase {
     func testFileIsOwnerOnly() async throws {
         let store = ObservationStore(directory: directory)
         _ = await store.observeBatch(
-            [("/a", .adHoc)], now: now, eventRetention: 90 * 86400)
+            [("/a", .adHoc, nil)], now: now, eventRetention: 90 * 86400)
         let path = directory.appendingPathComponent("observations.json").path
         let permissions =
             try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions]
@@ -206,7 +206,7 @@ final class ObservationStoreTests: XCTestCase {
     func testWipeForgetsEverything() async {
         let store = ObservationStore(directory: directory)
         _ = await store.observeBatch(
-            [("/a", .adHoc)], now: now, eventRetention: 90 * 86400)
+            [("/a", .adHoc, nil)], now: now, eventRetention: 90 * 86400)
         await store.wipe()
         let identity = await store.identity(for: "/a")
         XCTAssertNil(identity)
@@ -255,7 +255,7 @@ final class ObservationStoreEventTests: XCTestCase {
     func testClearingEventsKeepsIdentities() async {
         let store = ObservationStore(directory: directory)
         _ = await store.observeBatch(
-            [(path: "/tmp/a", tier: SignatureTier.adHoc)], now: Date(),
+            [(path: "/tmp/a", tier: SignatureTier.adHoc, launch: nil)], now: Date(),
             eventRetention: 86400)
         await store.clearEvents()
         let identity = await store.identity(for: "/tmp/a")

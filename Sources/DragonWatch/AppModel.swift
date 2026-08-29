@@ -6,6 +6,10 @@ struct ReviewItem: Identifiable, Sendable {
     let path: String
     let tier: SignatureTier
     let firstSeen: Date
+    /// Who started it and whether a package manager installed it — the two
+    /// facts a verdict actually turns on.
+    var launchedBy: LaunchContext?
+    var keg: HomebrewKeg?
 
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
@@ -124,6 +128,15 @@ struct ReviewItem: Identifiable, Sendable {
         }
     }
 
+    /// "Stop asking" without a verdict: the item leaves both lists and will
+    /// not alert again, and the ledger records that nobody vouched for it.
+    func ignoreReview(path: String) {
+        Task {
+            await baseline.recordVerdict(path: path, verdict: .ignored)
+            await refreshReviewLists()
+        }
+    }
+
     func resetBaseline() {
         Task {
             await baseline.reset()
@@ -155,6 +168,19 @@ struct ReviewItem: Identifiable, Sendable {
     func clearAlertHistory() {
         alerts.clearHistory()
         Task { await observations.clearEvents() }
+    }
+
+    /// Dismisses one alert from the list and the durable record. History
+    /// only: the binary's baseline verdict is untouched, so a genuinely new
+    /// sighting still alerts.
+    func dismissAlert(_ event: AlertEvent) {
+        alerts.dismiss(event.id)
+        Task {
+            await observations.remove(
+                event: ObservationLedger.Event(
+                    date: event.date, kind: event.kind.rawValue,
+                    title: event.title, detail: event.detail))
+        }
     }
 
     func observation(for path: String) async -> ObservationLedger.Identity? {
@@ -243,6 +269,20 @@ struct ReviewItem: Identifiable, Sendable {
             if record.pid == ownPID { trust.isSelf = true }
             processes.append(MonitoredProcess(record: record, trust: trust))
         }
+        // Parents resolve against this same listing, so "who launched it" is
+        // answered from the tick that noticed it — a parent that exits a
+        // second later would otherwise be unrecoverable.
+        let pathsByPID = Dictionary(
+            records.map { ($0.pid, $0.path) }, uniquingKeysWith: { first, _ in first })
+        let parentsByPID = Dictionary(
+            records.compactMap { record in record.parentPID.map { (record.pid, $0) } },
+            uniquingKeysWith: { first, _ in first })
+        var launches: [pid_t: LaunchContext] = [:]
+        for record in records {
+            launches[record.pid] = LaunchContext.resolve(
+                for: record, pathsByPID: pathsByPID, parentsByPID: parentsByPID,
+                lookup: ProcessSampler.path(forPID:))
+        }
         let grouped = ProcessGrouper.group(processes)
 
         let (cpu, memUsed) = await vitalsSampler.sampleCPUAndMemory()
@@ -266,12 +306,15 @@ struct ReviewItem: Identifiable, Sendable {
         overallBadge = grouped.map(\.worstBadge).max() ?? .trusted
         hasSampled = true
 
-        await watch(processes: processes, cpu: cpu, now: now)
+        await watch(processes: processes, launches: launches, cpu: cpu, now: now)
     }
 
     /// The background watcher: baseline diffs, persistence diffs, and the
     /// vitals-derived alert rules.
-    private func watch(processes: [MonitoredProcess], cpu: Double, now: Date) async {
+    private func watch(
+        processes: [MonitoredProcess], launches: [pid_t: LaunchContext], cpu: Double,
+        now: Date
+    ) async {
         let batch = await baseline.observeBatch(
             processes.map { ($0.record.path, $0.trust) }, now: now)
         let persistenceNews = await baseline.observePersistenceItems(
@@ -281,7 +324,8 @@ struct ReviewItem: Identifiable, Sendable {
         // masquerade case (same path, materially weaker signature), and
         // trickle-hash a few binaries per tick, non-trusted first.
         let sightings = await observations.observeBatch(
-            processes.map { ($0.record.path, $0.trust.tier) }, now: now,
+            processes.map { ($0.record.path, $0.trust.tier, launches[$0.record.pid]) },
+            now: now,
             eventRetention: TimeInterval(settings.historyRetentionDays) * 86400)
         if settings.isEnabled(.binaryReplaced) {
             for process in processes {
@@ -343,12 +387,18 @@ struct ReviewItem: Identifiable, Sendable {
                 let sealNote = enclosing.map {
                     " Inside signed \(($0 as NSString).lastPathComponent) — open the detail view to verify the bundle's seal."
                 }
+                // The alert is the moment the question gets asked; answer
+                // "who started it" and "did a package manager put it here"
+                // right there instead of one investigation later.
+                let provenance = ProvenanceNote.suffix(
+                    launch: launches[process.record.pid],
+                    keg: await Task.detached { HomebrewKeg.locate(path: path) }.value)
                 if process.trust.tier == .invalid, settings.isEnabled(.invalidSignature) {
                     raiseAndRecord(
                         .invalidSignature, key: path,
                         cooldown: Rule.oncePerPathCooldown,
                         title: "Invalid signature: \(name)",
-                        detail: "Tampered or revoked signature — \(path)", now: now)
+                        detail: "Tampered or revoked signature — \(path)\(provenance)", now: now)
                 } else if process.trust.tier != .invalid,
                     settings.isEnabled(.newUntrustedProcess)
                 {
@@ -356,7 +406,8 @@ struct ReviewItem: Identifiable, Sendable {
                         .newUntrustedProcess, key: path,
                         cooldown: Rule.oncePerPathCooldown,
                         title: "New \(process.trust.badge.label.lowercased()) process: \(name)",
-                        detail: "\(process.trust.tier.rawValue) — \(path)\(sealNote ?? "")",
+                        detail:
+                            "\(process.trust.tier.rawValue) — \(path)\(sealNote ?? "")\(provenance)",
                         now: now)
                 }
             }
@@ -480,10 +531,22 @@ struct ReviewItem: Identifiable, Sendable {
     }
 
     private func reviewItems() async -> [ReviewItem] {
-        await baseline.pendingReview().map(ReviewItem.init)
+        await enrich(baseline.pendingReview().map(ReviewItem.init))
     }
 
     private func unexpectedItems() async -> [ReviewItem] {
-        await baseline.markedUnexpected().map(ReviewItem.init)
+        await enrich(baseline.markedUnexpected().map(ReviewItem.init))
+    }
+
+    /// Review lists are short (a handful of items, asked once), so a ledger
+    /// lookup and a receipt read per item is cheap enough to do every tick.
+    private func enrich(_ items: [ReviewItem]) async -> [ReviewItem] {
+        var enriched = items
+        for index in enriched.indices {
+            let path = enriched[index].path
+            enriched[index].launchedBy = await observations.identity(for: path)?.launchedBy
+            enriched[index].keg = await Task.detached { HomebrewKeg.locate(path: path) }.value
+        }
+        return enriched
     }
 }

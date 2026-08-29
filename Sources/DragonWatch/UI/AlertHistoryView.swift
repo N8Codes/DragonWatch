@@ -59,7 +59,7 @@ struct AlertHistoryView: View {
                 Text(event.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .truncationMode(.middle)
                     .help(event.detail)
             }
@@ -67,6 +67,18 @@ struct AlertHistoryView: View {
             Text(event.date.formatted(date: .omitted, time: .shortened))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+            // Per-alert dismiss. Names the alert for VoiceOver: a column of
+            // identical "Dismiss, button" rows tells a screen-reader user
+            // nothing about which one they are about to remove.
+            Button {
+                model.dismissAlert(event)
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this alert")
+            .accessibilityLabel("Dismiss alert: \(event.title)")
         }
     }
 }

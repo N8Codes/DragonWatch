@@ -55,6 +55,9 @@ from a hidden folder stays trusted — an unsigned binary in `/tmp` does not.
 **Every rating explains itself.** Click any process and the detail view walks
 through the reasoning in the order the engine applied it — including signals
 that were considered and deliberately *not* counted, so nothing is silent.
+It also shows **who launched it** (parent process, captured the first time the
+binary was seen) and, for Homebrew installs, the keg's install receipt — the
+two facts a "was this expected?" verdict actually turns on.
 The **Criteria** tab lists the complete rulebook: every signature tier, every
 context signal with why it's treated as risk, every exemption, and what the
 app deliberately doesn't do. No cloud verdicts, no hidden heuristics — if you
@@ -89,12 +92,26 @@ a binary replaced in place, a sustained CPU spike, a network drop.
 
 - **Baseline ledger** decides what counts as "new". On first run anything not
   clearly trusted is shown for your verdict — asked once, remembered forever.
+  Three answers: **Expected** (accepted as normal), **Not expected** (stays
+  listed as one you flagged), or **Ignore** (hidden for good, no verdict —
+  it won't alert again, but nothing vouches for it).
+- **Alerts carry provenance.** A new-process alert names the parent that
+  started it ("Launched by zsh (pid 7083) — /bin/zsh"), says when that parent
+  sits inside an AI agent session (Claude Code, Codex, Gemini CLI, Aider,
+  Copilot CLI — "an AI agent, not you, started it"), and, inside a Homebrew
+  keg, the install receipt ("Homebrew receipt: node 25.9.0_3, poured from
+  bottle, installed 2 May 2026"). Context only — no rating ever rises because
+  of it.
 - **Observation history** records when each binary first appeared, its hash,
   and any signature change. Binaries are hashed a few per tick and re-hashed
   when the file changes on disk, so a replacement is noticed. Survives
   restarts, owner-only, exportable as JSON.
 - **Settings** tune cadence and CPU threshold, switch individual rules off, and
   reset the baseline after installing a batch of software.
+- **Alerts tab** lists every alert raised, newest first. Dismiss one with its
+  ✕ or clear them all; both are durable. Dismissing is history-keeping only —
+  the binary's expected/not-expected verdict lives in the Review tab and is
+  what decides whether it alerts again.
 
 ## Opt-in threat intel
 

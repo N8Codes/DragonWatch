@@ -64,8 +64,15 @@ struct AlertEvent: Identifiable, Sendable {
 
     private var throttle = AlertThrottle()
     private let notificationDelegate = ForegroundBannerDelegate()
-    private let canNotify = Bundle.main.bundleIdentifier != nil
+    private let canNotify: Bool
     private static let historyLimit = 100
+
+    /// `canNotify` defaults to "running from a real app bundle". Tests pass
+    /// false: `xctest` has a bundle identifier of its own, and
+    /// `UNUserNotificationCenter.current()` crashes without an app bundle.
+    init(canNotify: Bool = Bundle.main.bundleIdentifier != nil) {
+        self.canNotify = canNotify
+    }
 
     func requestAuthorizationIfNeeded() {
         guard canNotify else { return }
@@ -115,6 +122,13 @@ struct AlertEvent: Identifiable, Sendable {
     func clearHistory() {
         history = []
         unreadCount = 0
+    }
+
+    /// Drops one alert from the in-app list. The caller mirrors the removal
+    /// into the durable record, or the alert is back on the next launch.
+    func dismiss(_ id: AlertEvent.ID) {
+        history.removeAll { $0.id == id }
+        if history.isEmpty { unreadCount = 0 }
     }
 
     private func postNotification(title: String, detail: String) {

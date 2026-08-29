@@ -7,6 +7,11 @@ struct GroupRowView: View {
     let isExpanded: Bool
     let toggleExpanded: () -> Void
     let select: (MonitoredProcess) -> Void
+    /// Opens the group's own detail: every member as a tree, with pids,
+    /// start times and who started what.
+    var inspect: ((ProcessGroup) -> Void)? = nil
+    /// Width of the ⓘ column, reserved on every row.
+    static let inspectSlotWidth: CGFloat = 16
 
     var body: some View {
         VStack(spacing: 1) {
@@ -21,7 +26,10 @@ struct GroupRowView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .help("From \((group.key as NSString).deletingLastPathComponent)")
+                            .help(
+                                group.key.hasPrefix(ProcessGrouper.originKeyPrefix)
+                                    ? "Version of the running binary"
+                                    : "From \((group.key as NSString).deletingLastPathComponent)")
                     }
                     if group.members.count > 1 {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -34,6 +42,24 @@ struct GroupRowView: View {
                         count: group.members.count,
                         cpu: group.totalCPU,
                         memory: group.totalMemory)
+                    // The slot exists on every row, button or not, so the
+                    // CPU and memory columns line up down the whole list.
+                    Group {
+                        if group.members.count > 1, let inspect {
+                            Button {
+                                inspect(group)
+                            } label: {
+                                Image(systemName: "info.circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show every process in \(group.name) as a tree")
+                            .accessibilityLabel("Details for \(group.name)")
+                        } else {
+                            Color.clear
+                        }
+                    }
+                    .frame(width: Self.inspectSlotWidth)
                 }
                 .contentShape(Rectangle())
             }
@@ -58,6 +84,7 @@ struct GroupRowView: View {
                             MetricsView(
                                 cpu: process.record.cpuPercent,
                                 memory: process.record.residentBytes)
+                            Color.clear.frame(width: Self.inspectSlotWidth)
                         }
                         .contentShape(Rectangle())
                     }
@@ -84,6 +111,34 @@ struct GroupRowView: View {
             Image(nsImage: IconCache.icon(forPath: appPath))
                 .resizable()
                 .frame(width: 22, height: 22)
+        } else if group.key == ProcessGrouper.systemGroupKey {
+            Image(systemName: "apple.logo")
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+        } else if ProcessGrouper.isAgentGroup(group) {
+            if let appPath = LaunchContext.agentAppBundle(for: group.name) {
+                Image(nsImage: IconCache.icon(forPath: appPath))
+                    .resizable()
+                    .frame(width: 22, height: 22)
+                    .accessibilityLabel("\(group.name) sessions")
+            } else {
+                // No desktop app to borrow an icon from: a terminal with a
+                // spark — an agent working in a shell.
+                Image(systemName: "terminal")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .offset(x: 2, y: -2)
+                    }
+                    .help("AI agent sessions")
+                    .accessibilityLabel("\(group.name) sessions")
+            }
         } else {
             Image(systemName: "gearshape")
                 .font(.system(size: 15))

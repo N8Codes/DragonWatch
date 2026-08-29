@@ -2,6 +2,7 @@ import SwiftUI
 
 enum PanelTab {
     case processes
+    case tree
     case alerts
     case review
     case criteria
@@ -14,6 +15,7 @@ struct ContentView: View {
     @AppStorage("list.sort") private var sortRaw = ProcessListSort.riskFirst.rawValue
     @State private var tab: PanelTab = .processes
     @State private var selection: MonitoredProcess?
+    @State private var inspectedGroupID: String?
     @State private var expandedGroups: Set<String> = []
     @State private var searchText = ""
 
@@ -54,6 +56,26 @@ struct ContentView: View {
                         .controlSize(.small)
                     Spacer()
                 }
+                if let selection {
+                    Divider()
+                    ProcessDetailView(process: selection) { self.selection = nil }
+                } else if let inspectedGroupID,
+                    let group = model.groups.first(where: { $0.id == inspectedGroupID })
+                {
+                    Divider()
+                    GroupDetailView(
+                        group: group, allProcesses: model.groups.flatMap(\.members),
+                        select: { selection = $0 },
+                        dismiss: { self.inspectedGroupID = nil })
+                }
+            case .tree:
+                // The whole machine as launchd sees it now. On demand only —
+                // the main list stays grouped and stable; this one is allowed
+                // to be big.
+                ProcessTreeView(
+                    nodes: ProcessTree.build(model.groups.flatMap(\.members)),
+                    allProcesses: model.groups.flatMap(\.members),
+                    select: { selection = $0 })
                 if let selection {
                     Divider()
                     ProcessDetailView(process: selection) { self.selection = nil }
@@ -142,7 +164,14 @@ struct ContentView: View {
                                 expandedGroups.remove(group.id)
                             }
                         },
-                        select: { selection = $0 }
+                        select: {
+                            inspectedGroupID = nil
+                            selection = $0
+                        },
+                        inspect: {
+                            selection = nil
+                            inspectedGroupID = $0.id
+                        }
                     )
                 }
             }
@@ -153,6 +182,9 @@ struct ContentView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             tabButton(.processes, systemImage: "list.bullet", help: "Processes")
+            tabButton(
+                .tree, systemImage: "list.bullet.indent",
+                help: "Process tree — every process, nested under what started it")
             tabButton(
                 .alerts,
                 systemImage: model.alerts.unreadCount > 0 ? "bell.badge.fill" : "bell",

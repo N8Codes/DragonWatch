@@ -10,8 +10,9 @@ struct ProcessRecord: Identifiable, Hashable, Sendable {
     /// UI must show that rather than an implied zero.
     var cpuPercent: Double?
     var residentBytes: UInt64?
-    /// nil when the kernel withheld the BSD info record. Never 0: pid 0 is
-    /// the kernel, and "launched by kernel_task" is a claim, not an unknown.
+    /// nil when the kernel had no record for the pid (it exited mid-sample).
+    /// Never 0: pid 0 is the kernel, and "launched by kernel_task" is a
+    /// claim, not an unknown.
     var parentPID: pid_t?
     var startedAt: Date?
 

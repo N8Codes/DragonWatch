@@ -119,6 +119,17 @@ final class LaunchContextTests: XCTestCase {
         XCTAssertNil(decoded.ancestryDescription)
     }
 
+    func testAgentAppIconIsBorrowedOnlyWhenTheAppIsInstalled() {
+        XCTAssertEqual(
+            LaunchContext.agentAppBundle(
+                for: "Claude Code", exists: { $0.hasSuffix("Claude.app") }),
+            "/Applications/Claude.app")
+        XCTAssertNil(LaunchContext.agentAppBundle(for: "Claude Code", exists: { _ in false }))
+        XCTAssertNil(
+            LaunchContext.agentAppBundle(for: "Aider", exists: { _ in true }),
+            "no desktop app to borrow")
+    }
+
     func testSummaryNamesTheParent() {
         let context = LaunchContext(parentPID: 7083, parentPath: "/bin/zsh", startedAt: nil)
         XCTAssertEqual(context.summary, "zsh (pid 7083)")

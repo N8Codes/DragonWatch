@@ -9,8 +9,8 @@ struct LaunchContext: Codable, Equatable, Sendable {
     struct Ancestor: Codable, Equatable, Sendable {
         let pid: Int32
         let name: String
-        /// Origin for a name that says nothing on its own — Claude Code's
-        /// executable is literally "2.1.251", inside `…/claude/versions/`.
+        /// Origin for a name that says nothing on its own — a binary called
+        /// "1.2.3" inside `…/<tool>/versions/` is identified by `<tool>`.
         var hint: String?
 
         init(pid: Int32, name: String, hint: String? = nil) {
@@ -24,7 +24,7 @@ struct LaunchContext: Codable, Equatable, Sendable {
             self.init(pid: pid, name: name, hint: ProcessNameContext.hint(name: name, path: path))
         }
 
-        /// "2.1.251 · claude", as the process list shows it.
+        /// "1.2.3 · toolkit", as the process list shows it.
         var display: String { hint.map { "\(name) · \($0)" } ?? name }
     }
 
@@ -41,11 +41,28 @@ struct LaunchContext: Codable, Equatable, Sendable {
     ]
     static let ancestryDepth = 8
 
+    /// The desktop app that shares an agent's identity, when one is
+    /// installed — its icon is the honest picture for the CLI's row. Nothing
+    /// is bundled: the icon comes from the user's own copy, like any app.
+    static let agentApps: [String: String] = [
+        "Claude Code": "/Applications/Claude.app",
+        "Claude app": "/Applications/Claude.app",
+    ]
+
+    static func agentAppBundle(
+        for product: String,
+        exists: (String) -> Bool = {
+            FileManager.default.fileExists(atPath: $0)
+        }
+    ) -> String? {
+        agentApps[product].flatMap { exists($0) ? $0 : nil }
+    }
+
     let parentPID: Int32
     /// nil when the parent had already exited by the time it was looked up.
     let parentPath: String?
-    /// When the process itself started, from the kernel's BSD info record.
-    /// The sampler sees a process up to one cadence later than this.
+    /// When the process itself started, per the kernel. The sampler sees a
+    /// process up to one cadence later than this.
     let startedAt: Date?
     /// Parent first, then its parent, up to `ancestryDepth` or launchd.
     /// Optional so ledgers written before this field existed still decode.
@@ -61,7 +78,7 @@ struct LaunchContext: Codable, Equatable, Sendable {
         self.ancestors = ancestors
     }
 
-    /// The nearest AI-agent ancestor, if any: ("Claude Code", pid).
+    /// The nearest AI-agent ancestor, if any, as (product name, pid).
     var agentSession: (product: String, pid: Int32)? {
         for ancestor in ancestors ?? [] {
             if let product = Self.agents[ancestor.name]
@@ -73,7 +90,7 @@ struct LaunchContext: Codable, Equatable, Sendable {
         return nil
     }
 
-    /// "zsh ← claude ← zsh ← Terminal ← launchd"
+    /// "zsh ← 1.2.3 · toolkit ← Terminal ← launchd"
     var ancestryDescription: String? {
         guard let ancestors, !ancestors.isEmpty else { return nil }
         return ancestors.map(\.display).joined(separator: " ← ")

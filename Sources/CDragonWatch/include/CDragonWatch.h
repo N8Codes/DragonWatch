@@ -21,9 +21,8 @@ static inline int dw_proc_pid_rusage(pid_t pid, dw_rusage_info *ri) {
 /* Parent pid and start time (Unix epoch seconds) of a process, via the
    KERN_PROC sysctl that `ps` uses — unprivileged for every process, unlike
    proc_pidinfo(PROC_PIDTBSDINFO), which the kernel refuses for other users'
-   processes (measured: 0 of ~300 root daemons answered). Returns 0 on
-   success, -1 when the process is gone — callers treat that as "unknown",
-   never as pid 0. */
+   processes. Returns 0 on success, -1 when the process is gone — callers
+   treat that as "unknown", never as pid 0. */
 static inline int dw_proc_parent(pid_t pid, pid_t *ppid, double *start_epoch) {
     int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
     struct kinfo_proc info;

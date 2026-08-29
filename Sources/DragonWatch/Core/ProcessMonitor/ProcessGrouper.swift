@@ -31,13 +31,45 @@ struct ProcessGroup: Identifiable, Sendable {
 
 /// Collapses the flat process list to the app level: everything inside an .app
 /// bundle (including nested helper bundles) groups under the outermost app;
+/// Apple's own bare daemons collapse into one "macOS system" group; other
 /// bare binaries stand alone.
 enum ProcessGrouper {
+    /// Not a path, so it can never collide with a real group key.
+    static let systemGroupKey = "system://macOS"
+    static let systemGroupName = "macOS system"
+    /// Some tools install each version as its own binary, named only by the
+    /// version number, under a folder that carries the real name. Those
+    /// group by that folder, so several running versions are one row — and
+    /// when the folder is a known agent CLI, the row gets the product name.
+    static let originKeyPrefix = "origin://"
+
+    static func isAgentGroup(_ group: ProcessGroup) -> Bool {
+        group.key.hasPrefix(originKeyPrefix) && LaunchContext.agents.values.contains(group.name)
+    }
+
+    /// The hundreds of Apple daemons that make a Mac a Mac. Nobody reads
+    /// them one by one, and their badge is the OS's own — so they fold into
+    /// one row whose badge still rolls up the worst member.
+    static func isSystemDaemon(_ process: MonitoredProcess) -> Bool {
+        switch process.trust.tier {
+        case .applePlatform, .osManagedUnreadable: !process.trust.isSelf
+        default: false
+        }
+    }
+
     static func group(_ processes: [MonitoredProcess]) -> [ProcessGroup] {
         var groups: [String: ProcessGroup] = [:]
         for process in processes {
             let path = process.record.path
-            if let root = ContextInspector.bundleRoot(of: path) {
+            if ContextInspector.bundleRoot(of: path) == nil, isSystemDaemon(process) {
+                groups[
+                    systemGroupKey,
+                    default: ProcessGroup(
+                        key: systemGroupKey, name: systemGroupName, appBundlePath: nil,
+                        contextHint: nil, members: []
+                    )
+                ].members.append(process)
+            } else if let root = ContextInspector.bundleRoot(of: path) {
                 let name = ((root as NSString).lastPathComponent as NSString)
                     .deletingPathExtension
                 groups[
@@ -47,17 +79,30 @@ enum ProcessGrouper {
                         contextHint: nil, members: []
                     )
                 ].members.append(process)
+            } else if let hint = ProcessNameContext.hint(name: process.record.name, path: path) {
+                let key = originKeyPrefix + hint.lowercased()
+                groups[
+                    key,
+                    default: ProcessGroup(
+                        key: key, name: LaunchContext.agents[hint] ?? hint, appBundlePath: nil,
+                        contextHint: nil, members: []
+                    )
+                ].members.append(process)
             } else {
                 groups[
                     path,
                     default: ProcessGroup(
                         key: path, name: process.record.name, appBundlePath: nil,
-                        contextHint: ProcessNameContext.hint(
-                            name: process.record.name, path: path),
-                        members: []
+                        contextHint: nil, members: []
                     )
                 ].members.append(process)
             }
+        }
+        // An origin group with one member still shows which version it is;
+        // with several, the expanded rows do.
+        for (key, group) in groups where key.hasPrefix(originKeyPrefix) && group.members.count == 1
+        {
+            groups[key]?.contextHint = group.members[0].record.name
         }
         // Stable ordering: badge severity, then name — never CPU, which
         // changes every sample and would make rows jump mid-read. The numbers

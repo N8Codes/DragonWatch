@@ -65,15 +65,29 @@ disagree with a judgement, you can see exactly which rule produced it.
 
 ## Finding things
 
+Apps group with their helpers under the app's icon, and Apple's own daemons —
+the hundreds of `trustd`s and `cfprefsd`s that make a Mac a Mac — fold into
+one **macOS system** row, so the list is about what *you* run. A fold never
+hides anything: a group's badge is always its worst member's.
+
+Two ways to see everything: the ⓘ on any group opens it as a **tree** — every
+process nested under what started it, with pid, start time, CPU and memory,
+each row clickable for its rating and history — and the **Process tree** tab
+does the same for the whole machine, rooted at `launchd`.
+
 Search filters the list as you type, matching app and process names, paths,
 and origin hints — so `chrome`, `/tmp`, and a version-numbered binary all
 find what you'd expect. Sorting defaults to risk first (anything suspicious
 at the top) and can switch to name A→Z or Z→A. Order never depends on
 changing numbers like CPU, so rows stay put while you read them.
 
-Binaries whose filename says nothing on its own get their origin alongside
-it — a bare `2.1.222` shows as `2.1.222 · toolkit`, naming the folder it
-came from.
+Binaries whose filename says nothing on its own are grouped and named by
+the folder they came from — a bare `2.1.222` shows as `toolkit · 2.1.222`,
+and several sessions of one tool running different versions are one row with
+the versions inside it. Known AI agent CLIs (Claude Code, Codex, Gemini CLI,
+Aider, Copilot CLI) get their product name, and the matching desktop app's
+icon when it is installed — otherwise a terminal-with-spark glyph. Nothing
+third-party is bundled.
 
 ## Vitals
 

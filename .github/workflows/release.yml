@@ -19,13 +19,17 @@ jobs:
       - name: Publish release with checksum
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          draft: true
+          # Published immediately: the tag push is the deliberate act, and a
+          # draft that still needs a click is a release that can be forgotten.
           files: |
             build/DragonWatch-*.zip
             build/DragonWatch-*.zip.sha256
           body: |
-            Ad-hoc signed build — right-click → Open on first launch, or build
-            from source with `./Scripts/make-app.sh`.
+            Universal (Apple silicon + Intel), ad-hoc signed. macOS refuses
+            the first launch: on macOS 15 or later open it once, then
+            System Settings → Privacy & Security → **Open Anyway**; on
+            macOS 14, right-click → Open. Or build from source with
+            `./Scripts/make-app.sh`.
 
             Verify your download:
             ```sh

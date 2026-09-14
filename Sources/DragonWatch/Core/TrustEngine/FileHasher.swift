@@ -2,7 +2,9 @@ import CryptoKit
 import Foundation
 
 /// SHA-256 of executables, streamed in chunks (binaries can be hundreds of
-/// MB) and cached by (path, mtime) like the signature checks.
+/// MB) and cached by (path, mtime) like the signature checks. Feeds the
+/// observation ledger's replaced-binary detection; the digest never leaves
+/// this Mac.
 actor FileHasher {
     private var cache: [String: (mtime: Date, digest: String)] = [:]
 
@@ -24,8 +26,8 @@ actor FileHasher {
     ///
     /// A read error partway through must not finalize the digest. Treating a
     /// throw as end-of-file yields the hash of a prefix: a well-formed, wrong
-    /// answer that then gets cached and sent to the malware-list and
-    /// VirusTotal lookups, where a wrong hash reads as "not known malware".
+    /// answer that then gets cached and recorded in the ledger, where the
+    /// next correct read shows up as a phantom "binary changed" transition.
     nonisolated static func sha256Data(path: String) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }

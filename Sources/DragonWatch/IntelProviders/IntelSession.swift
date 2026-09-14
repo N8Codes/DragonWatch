@@ -5,8 +5,8 @@ import Foundation
 /// `URLSession.shared` carries the process-wide cookie store and the default
 /// header set, which quietly turns "we only ask a public feed for a public
 /// file" into a tracked, fingerprintable client: a server that returns one
-/// `Set-Cookie` can link every weekly CISA KEV pull, every daily MalwareBazaar
-/// pull, and every NVD lookup into a single persistent identity, and the
+/// `Set-Cookie` can link every daily CISA KEV pull and every NVD lookup into
+/// a single persistent identity, and the
 /// default `User-Agent` discloses the exact macOS kernel build
 /// (`CFNetwork/… Darwin/25.5.0`) while `Accept-Language` discloses the locale.
 ///

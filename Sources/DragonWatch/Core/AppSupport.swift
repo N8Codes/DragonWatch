@@ -35,4 +35,19 @@ enum AppSupport {
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
+
+    /// Files written by features that no longer exist. The MalwareBazaar hash
+    /// index was ~32 MB and would otherwise sit in Application Support
+    /// forever after an update; removing it at launch is the only cleanup
+    /// the feature's removal needs.
+    static let retiredFileNames = ["malware-hashes.bin", "malware-hashes-meta.json"]
+
+    /// Deletes retired files if present. Only these exact names, only in our
+    /// own directory — never anything the current build still writes.
+    static func removeRetiredFiles(in directory: URL? = nil) {
+        let dir = self.directory(override: directory)
+        for name in retiredFileNames {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+        }
+    }
 }

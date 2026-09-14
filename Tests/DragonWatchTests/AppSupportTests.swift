@@ -41,6 +41,28 @@ final class AppSupportTests: XCTestCase {
         XCTAssertEqual(try mode(root.path), 0o700, "must repair an existing directory")
     }
 
+    /// A removed feature's ~32 MB index must not sit in Application Support
+    /// forever; only the retired names go, and everything else stays.
+    func testRetiredFilesAreRemovedAndLiveFilesKept() throws {
+        let dir = AppSupport.directory(override: root)
+        for name in AppSupport.retiredFileNames + ["observations.json"] {
+            try Data("x".utf8).write(to: dir.appendingPathComponent(name))
+        }
+
+        AppSupport.removeRetiredFiles(in: root)
+
+        for name in AppSupport.retiredFileNames {
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path),
+                "\(name) should be gone")
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: dir.appendingPathComponent("observations.json").path))
+        // Idempotent: a second launch with nothing to remove is not an error.
+        AppSupport.removeRetiredFiles(in: root)
+    }
+
     func testPrivateWriteIsOwnerOnlyAndStaysSoOnRewrite() throws {
         let dir = AppSupport.directory(override: root)
         let file = dir.appendingPathComponent("secret.json")

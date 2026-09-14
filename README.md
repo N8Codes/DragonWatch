@@ -2,12 +2,6 @@
 
 **A lightweight macOS process trust monitor.**
 
-> **Beta.** Three alert paths are confirmed firing on real hardware (new
-> unsigned process, new LaunchAgent, replaced binary). The known-malware,
-> invalid-signature, sustained-CPU and network-change alerts are unit-tested
-> but unproven live. Tested by one person on one Mac — treat a *missing*
-> notification as unproven, not impossible.
-
 DragonWatch lives in your menu bar behind a dragon-eye icon. Open it and you see
 every app and process running on your Mac, grouped the way you think about
 them, each with a trust badge derived from macOS's own security signals —
@@ -31,12 +25,13 @@ macOS already runs XProtect and Gatekeeper underneath.
 
 - **Read-only.** Never stops, kills, quarantines, or modifies another program,
   and never asks for elevated privileges.
-- **Quiet.** With intel off — how it ships — the only network request is a
-  latency probe to Apple's captive-portal URL, once a minute and only while
-  the popover is open. Enabling a provider adds background downloads of public
-  threat lists.
-- **Private.** No data about your machine is sent anywhere. Opt-in intel is the
-  only exception, and each provider says exactly what it sends.
+- **Quiet.** As it ships, the only network request is a latency probe to
+  Apple's captive-portal URL, once a minute and only while the popover is
+  open. Enabling the optional CISA catalog adds nothing until you run a check
+  on a process; that fetches the public list (at most once a day) and NVD's
+  version data for it.
+- **Private.** Nothing about your machine is ever sent anywhere. There is no
+  cloud lookup, no API key, and no toggle that changes that.
 
 ## How trust is determined
 
@@ -121,44 +116,48 @@ a binary replaced in place, a sustained CPU spike, a network drop.
   when the file changes on disk, so a replacement is noticed. Survives
   restarts, owner-only, exportable as JSON.
 - **Settings** tune cadence and CPU threshold, switch individual rules off, and
-  reset the baseline after installing a batch of software.
+  reset the baseline after installing a batch of software. It also shows
+  whether macOS is allowing DragonWatch's notifications: the banner is a
+  per-app permission in System Settings → Notifications, and if it is off
+  the alert still lands in the Alerts tab and on the menu bar icon — it just
+  does not interrupt you.
 - **Alerts tab** lists every alert raised, newest first. Dismiss one with its
   ✕ or clear them all; both are durable. Dismissing is history-keeping only —
   the binary's expected/not-expected verdict lives in the Review tab and is
   what decides whether it alerts again.
 
-## Opt-in threat intel
+## Opt-in vulnerability catalog
 
-Off by default, and each provider states exactly what leaves the machine.
-Anything that sends data runs only when you press **Run intel checks** on a
-process; the one provider whose matching is fully local (MalwareBazaar) also
-watches in the background.
+Off by default, and runs only when you press **Run intel checks** on a
+process. **CISA KEV + NVD** downloads CISA's public catalog of known exploited
+vulnerabilities (at most daily) plus NVD version ranges for every listed CVE,
+and matches locally. Nothing about your Mac is sent — every KEV CVE is synced
+precisely so the traffic reveals nothing about what you run. With version data
+a hit can say "your version is in the affected range"; without it, matches
+stay product-level and informational.
 
-- **CISA KEV + NVD** — downloads CISA's public known-exploited-vulnerabilities
-  catalog (daily) plus NVD version ranges for every listed CVE, and matches
-  locally. Nothing about your Mac is sent — all KEV CVEs are synced precisely
-  so the traffic reveals nothing about what you run. With version data a hit
-  can say "your version is in the affected range"; without it, matches stay
-  product-level and informational.
-- **MalwareBazaar** — downloads abuse.ch's public malware-hash list (~40 MB
-  weekly plus daily deltas) and matches SHA-256s locally. Because the check
-  never sends anything, it also runs automatically: a non-trusted process
-  whose hash is in the list raises a "known malware" alert. Community-sourced
-  data, labeled as such.
-- **VirusTotal** — sends the executable's SHA-256 hash (and only the hash) to
-  VirusTotal, which still reveals *what* you run to a third party. Needs your
-  own free API key.
+DragonWatch deliberately has no cloud reputation lookup and no malware-hash
+list. A hash lookup reveals what you run to a third party, and a hash list
+only catches catalogued samples that XProtect already blocks — neither earned
+the privacy cost or the download.
 
 ## Installing
 
 Download the latest release, unzip, and drag `DragonWatch.app` to
-`/Applications`. It lives in the menu bar — there is no Dock icon while it
-runs.
+`/Applications`. The build is universal (Apple silicon and Intel). It lives
+in the menu bar — there is no Dock icon while it runs.
 
-Releases are ad-hoc signed, so the **first** launch needs **right-click →
-Open** instead of a double-click; macOS only offers the override from the
-context menu. Every launch after that is normal. Signing it any other way
-needs a paid Apple Developer account, which this project does not have.
+Releases are ad-hoc signed, not notarized, so macOS refuses the **first**
+launch. The override depends on your macOS version:
+
+- **macOS 15 or later:** open the app once and let it be refused, then go to
+  **System Settings → Privacy & Security**, scroll to the message about
+  DragonWatch, and click **Open Anyway**.
+- **macOS 14:** right-click the app and choose **Open**; the context menu
+  offers an Open button the double-click does not.
+
+Every launch after that is normal. Notarizing needs a paid Apple Developer
+account, which this project deliberately does not have.
 
 Would rather not trust a binary at all? Build it yourself — that is the
 stronger option for a tool like this, and it sidesteps the warning entirely.
@@ -168,7 +167,7 @@ stronger option for a tool like this, and it sidesteps the warning entirely.
 ```sh
 git clone https://github.com/N8Codes/DragonWatch.git
 cd DragonWatch
-./Scripts/make-app.sh    # builds build/DragonWatch.app (ad-hoc signed)
+./Scripts/make-app.sh    # builds build/DragonWatch.app (universal, ad-hoc signed)
 open build/DragonWatch.app
 ```
 
@@ -188,9 +187,12 @@ shasum -a 256 -c DragonWatch-<version>.zip.sha256
 ## Contributing
 
 Issues and pull requests welcome — especially reports of an alert that should
-have fired and didn't. `CONTRIBUTING.md` has the build and test commands, how
-to verify the watcher against planted test cases, and the invariants a change
-must not break.
+have fired and didn't. Every alert kind except the network drop has a planted
+test case in `Scripts/verify-watcher.sh`, and the network drop has fired for
+real; still, this has been tested by few people on few Macs, so treat a
+missing notification as a bug report worth filing, not as impossible.
+`CONTRIBUTING.md` has the build and test commands, how to verify the watcher,
+and the invariants a change must not break.
 
 ## License
 

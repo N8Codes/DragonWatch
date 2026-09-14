@@ -1,11 +1,35 @@
 import Foundation
 import UserNotifications
+import os
+
+/// Whether macOS will actually show DragonWatch's banners. The alert pipeline
+/// can be working perfectly and still be silent: notifications are gated by a
+/// per-app permission in System Settings, and a refused or never-granted one
+/// used to be invisible — the app never checked, so the only symptom was
+/// "I didn't get a notification".
+enum NotificationPermission: Equatable, Sendable {
+    /// Not asked yet, or running without a bundle (no notifications possible).
+    case unknown
+    case allowed
+    /// Turned off in System Settings > Notifications.
+    case denied
+    /// The permission request itself failed; the message is the system's.
+    case failed(String)
+
+    static func from(status: UNAuthorizationStatus, requestError: Error?) -> Self {
+        switch status {
+        case .authorized, .provisional: .allowed
+        case .denied: .denied
+        case .notDetermined: requestError.map { .failed($0.localizedDescription) } ?? .unknown
+        @unknown default: .unknown
+        }
+    }
+}
 
 enum AlertKind: String, CaseIterable, Sendable {
     case newUntrustedProcess
     case invalidSignature
     case newPersistenceItem
-    case knownMalware
     case binaryReplaced
     case sustainedCPU
     case networkChange
@@ -15,7 +39,6 @@ enum AlertKind: String, CaseIterable, Sendable {
         case .newUntrustedProcess: "New non-trusted process"
         case .invalidSignature: "Invalid signature"
         case .newPersistenceItem: "New persistence item"
-        case .knownMalware: "Known-malware hash match"
         case .binaryReplaced: "Binary replaced in place"
         case .sustainedCPU: "Sustained CPU spike"
         case .networkChange: "Network drop / restore"
@@ -27,7 +50,6 @@ enum AlertKind: String, CaseIterable, Sendable {
         case .newUntrustedProcess: "questionmark.app"
         case .invalidSignature: "xmark.seal"
         case .newPersistenceItem: "pin"
-        case .knownMalware: "exclamationmark.octagon"
         case .binaryReplaced: "arrow.triangle.2.circlepath"
         case .sustainedCPU: "cpu"
         case .networkChange: "wifi.exclamationmark"
@@ -41,7 +63,7 @@ enum AlertKind: String, CaseIterable, Sendable {
         case .newPersistenceItem: "ATT&CK T1543"  // Create/Modify System Process
         case .invalidSignature: "ATT&CK T1036.001"  // Invalid Code Signature
         case .binaryReplaced: "ATT&CK T1036"  // Masquerading
-        case .newUntrustedProcess, .knownMalware, .sustainedCPU, .networkChange: nil
+        case .newUntrustedProcess, .sustainedCPU, .networkChange: nil
         }
     }
 }
@@ -61,6 +83,10 @@ struct AlertEvent: Identifiable, Sendable {
 @Observable final class AlertCenter {
     private(set) var history: [AlertEvent] = []
     private(set) var unreadCount = 0
+    private(set) var notificationPermission: NotificationPermission = .unknown
+
+    nonisolated private static let log = Logger(
+        subsystem: "com.dragonwatch.DragonWatch", category: "notifications")
 
     private var throttle = AlertThrottle()
     private let notificationDelegate = ForegroundBannerDelegate()
@@ -80,7 +106,30 @@ struct AlertEvent: Identifiable, Sendable {
         // Accessory apps count as "foreground", which suppresses banners
         // unless a delegate says otherwise.
         center.delegate = notificationDelegate
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+            if let error {
+                Self.log.error(
+                    "Notification authorization failed: \(error.localizedDescription, privacy: .public)"
+                )
+            } else {
+                Self.log.info("Notification authorization granted: \(granted)")
+            }
+            Task { @MainActor in self?.refreshNotificationPermission(requestError: error) }
+        }
+    }
+
+    /// Re-reads the system's answer, so Settings can show it and reflect a
+    /// change the user just made in System Settings.
+    func refreshNotificationPermission(requestError: Error? = nil) {
+        guard canNotify else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            let permission = NotificationPermission.from(
+                status: settings.authorizationStatus, requestError: requestError)
+            Self.log.info(
+                "Notification settings: status \(settings.authorizationStatus.rawValue) alerts \(settings.alertSetting.rawValue)"
+            )
+            Task { @MainActor in self?.notificationPermission = permission }
+        }
     }
 
     /// Returns whether the alert actually fired (i.e. survived the throttle),

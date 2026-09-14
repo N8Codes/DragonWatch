@@ -18,3 +18,5 @@ jobs:
         run: swift test
       - name: Assemble app bundle
         run: ./Scripts/make-app.sh
+      - name: Verify the bundle is universal
+        run: lipo -archs build/DragonWatch.app/Contents/MacOS/DragonWatch | grep -q 'x86_64' && lipo -archs build/DragonWatch.app/Contents/MacOS/DragonWatch | grep -q 'arm64'

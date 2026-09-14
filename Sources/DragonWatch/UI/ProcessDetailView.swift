@@ -275,7 +275,7 @@ struct IntelSectionView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        case .done(let findings, let problems):
+        case .done(let findings):
             VStack(alignment: .leading, spacing: 3) {
                 if findings.isEmpty {
                     Text("No intel findings.")
@@ -296,18 +296,6 @@ struct IntelSectionView: View {
                             .foregroundStyle(color(for: finding.severity))
                     }
                     .font(.caption)
-                }
-                // Shown alongside the findings, not instead of them: these
-                // say a source was unreachable, which is weaker evidence than
-                // anything a source that did answer reported.
-                ForEach(problems, id: \.self) { problem in
-                    HStack(spacing: 6) {
-                        Text(problem)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button("Retry") { intel.check(process) }
-                            .controlSize(.small)
-                    }
                 }
             }
         case .failed(let message):

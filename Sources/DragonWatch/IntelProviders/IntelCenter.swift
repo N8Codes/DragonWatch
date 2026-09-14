@@ -1,25 +1,18 @@
 import Foundation
 
-/// Runs the enabled intel providers against one process, on demand. The one
-/// exception is MalwareBazaar: matching a hash is entirely local, so the
-/// watcher may check every non-trusted process without revealing any of them.
-/// It still downloads the public list on its own cadence — machine-independent
-/// traffic, but traffic. Results cache by executable path for the session.
+/// Runs the enabled intel provider against one process, on demand — never as
+/// part of the monitoring loop. Results cache by executable path for the
+/// session.
 @MainActor
 @Observable final class IntelCenter {
     enum CheckState {
         case running
-        /// Findings, plus any provider that could not be reached. A provider
-        /// failing is not a reason to withhold what the others found.
-        case done([IntelFinding], problems: [String] = [])
+        case done([IntelFinding])
         case failed(String)
     }
     private(set) var results: [String: CheckState] = [:]
 
-    let malwareStore = MalwareHashStore()
-
     private let settings: SettingsModel
-    private let hasher = FileHasher()
     private let kev = KEVProvider()
 
     init(settings: SettingsModel) {
@@ -27,96 +20,34 @@ import Foundation
     }
 
     var anyProviderEnabled: Bool {
-        settings.kevEnabled || settings.mbEnabled || settings.vtEnabled
+        settings.kevEnabled
     }
 
     /// What the user is consenting to, assembled from the enabled providers'
     /// own disclosures.
     var activeDisclosures: [String] {
-        var disclosures: [String] = []
-        if settings.kevEnabled { disclosures.append(kev.privacyDisclosure) }
-        if settings.mbEnabled {
-            disclosures.append(
-                MalwareBazaarProvider(store: malwareStore).privacyDisclosure)
-        }
-        if settings.vtEnabled {
-            disclosures.append(
-                VirusTotalProvider(apiKey: settings.vtAPIKey).privacyDisclosure)
-        }
-        return disclosures
-    }
-
-    /// Shared cached hasher — the observation ledger's provenance queue uses
-    /// this so a binary is hashed once, not once per consumer.
-    func hash(ofPath path: String) async -> String? {
-        await hasher.sha256(ofPath: path)
-    }
-
-    /// Background rule support: hash the given executables (cached) and return
-    /// the paths whose hashes appear in the local malware list. No network.
-    func knownMalwareHits(paths: [String]) async -> [String] {
-        var hits: [String] = []
-        for path in paths {
-            if let hash = await hasher.sha256(ofPath: path),
-                await malwareStore.contains(hash)
-            {
-                hits.append(path)
-            }
-        }
-        return hits
+        settings.kevEnabled ? [kev.privacyDisclosure] : []
     }
 
     func check(_ process: MonitoredProcess) {
+        // The button only renders while a provider is enabled; a call without
+        // one is a stale view, not a user action.
+        guard settings.kevEnabled else { return }
         let path = process.record.path
         if case .running = results[path] { return }
         results[path] = .running
 
-        let kevEnabled = settings.kevEnabled
-        let mbEnabled = settings.mbEnabled
-        let vtEnabled = settings.vtEnabled
-        let vtKey = settings.vtAPIKey
         let app = appInfo(for: process)
+        let subject = IntelSubject(
+            executablePath: path, appName: app.name, appVersion: app.version)
 
         Task {
-            let sha256 =
-                vtEnabled || mbEnabled ? await hasher.sha256(ofPath: path) : nil
-            let subject = IntelSubject(
-                executablePath: path, sha256: sha256,
-                appName: app.name, appVersion: app.version)
-
-            var providers: [any IntelProvider] = []
-            if kevEnabled { providers.append(kev) }
-            if mbEnabled { providers.append(MalwareBazaarProvider(store: malwareStore)) }
-            if vtEnabled { providers.append(VirusTotalProvider(apiKey: vtKey)) }
-
-            // One provider's failure must not discard another's findings.
-            // Returning on the first error meant a VirusTotal rate limit — the
-            // expected state on a free key's fifth lookup in a minute — threw
-            // away a MalwareBazaar hit that had already come back saying the
-            // binary is catalogued malware, and showed only the rate-limit
-            // message.
-            var findings: [IntelFinding] = []
-            var problems: [String] = []
-            for provider in providers {
-                do {
-                    findings += try await provider.findings(for: subject)
-                } catch VirusTotalProvider.LookupError.missingKey {
-                    problems.append("VirusTotal needs an API key (Settings).")
-                } catch VirusTotalProvider.LookupError.invalidKey {
-                    problems.append("VirusTotal rejected the API key.")
-                } catch VirusTotalProvider.LookupError.rateLimited {
-                    problems.append(
-                        "VirusTotal rate limit hit — free keys allow 4 lookups/min.")
-                } catch {
-                    problems.append("\(provider.name) lookup failed.")
-                }
+            do {
+                let findings = try await kev.findings(for: subject)
+                results[path] = .done(findings.sorted { $0.severity > $1.severity })
+            } catch {
+                results[path] = .failed("\(kev.name) lookup failed.")
             }
-            if findings.isEmpty, !problems.isEmpty {
-                results[path] = .failed(problems.joined(separator: " "))
-                return
-            }
-            results[path] = .done(
-                findings.sorted { $0.severity > $1.severity }, problems: problems)
         }
     }
 

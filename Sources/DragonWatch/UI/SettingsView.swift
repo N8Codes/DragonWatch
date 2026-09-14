@@ -30,6 +30,8 @@ struct SettingsView: View {
                     )
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                } else {
+                    NotificationPermissionRow(permission: model.alerts.notificationPermission)
                 }
             }
 
@@ -37,7 +39,7 @@ struct SettingsView: View {
                 WatcherSettingsSection(settings: model.settings)
             }
 
-            section("Threat intel") {
+            section("Vulnerability catalog") {
                 IntelSettingsSection(settings: model.settings)
             }
 
@@ -71,13 +73,32 @@ struct SettingsView: View {
                 .foregroundStyle(.tertiary)
             }
 
+            // Which build is this? Answered here because a menu bar app has
+            // no About window and the bundle's version is otherwise only
+            // visible from Finder.
+            Text(Self.versionLine)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel("Version \(Self.versionLine)")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             launchAtLogin = isBundled && SMAppService.mainApp.status == .enabled
+            model.alerts.refreshNotificationPermission()
         }
     }
+
+    /// "DragonWatch 1.0.0 (4)", or "DragonWatch (unbundled build)" under
+    /// `swift run`, where there is no Info.plist to read.
+    static let versionLine: String = {
+        let info = Bundle.main.infoDictionary ?? [:]
+        guard let short = info["CFBundleShortVersionString"] as? String else {
+            return "DragonWatch (unbundled build)"
+        }
+        let build = (info["CFBundleVersion"] as? String).map { " (\($0))" } ?? ""
+        return "DragonWatch \(short)\(build)"
+    }()
 
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -98,6 +119,46 @@ struct SettingsView: View {
             }
         } catch {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+}
+
+/// Says whether macOS will show banners at all — the alert pipeline is silent
+/// without the per-app permission, and until this row existed the only
+/// symptom of a refused one was a notification that never came.
+private struct NotificationPermissionRow: View {
+    let permission: NotificationPermission
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(permission == .allowed ? .tertiary : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if permission != .allowed {
+                Button("Open Notification Settings…") {
+                    NSWorkspace.shared.open(
+                        URL(
+                            string:
+                                "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+                        )!)
+                }
+                .controlSize(.small)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var message: String {
+        switch permission {
+        case .allowed:
+            "Notifications: allowed."
+        case .denied:
+            "Notifications are turned off for DragonWatch in System Settings. Alerts still appear in the Alerts tab and on the menu bar icon."
+        case .failed(let reason):
+            "macOS refused the notification permission request (\(reason)). Alerts still appear in the Alerts tab and on the menu bar icon."
+        case .unknown:
+            "Notifications: not yet decided — macOS asks the first time an alert would show."
         }
     }
 }
@@ -132,14 +193,15 @@ private struct HistorySettingsSection: View {
     }
 }
 
-/// The only place DragonWatch ever talks to anyone but Apple/Cloudflare —
-/// off by default, each toggle stating exactly what leaves the machine.
+/// The only place DragonWatch ever talks to anyone but Apple — off by
+/// default, and the toggle states exactly what it downloads. Nothing about
+/// this Mac goes the other way.
 private struct IntelSettingsSection: View {
     @Bindable var settings: SettingsModel
 
     var body: some View {
         Text(
-            "Off by default. Anything that sends data runs only when you press \"Run intel checks\" on a process; MalwareBazaar matching is local, so it also watches in the background."
+            "Off by default. Runs only when you press \"Run intel checks\" on a process; matching happens on this Mac."
         )
         .font(.caption)
         .foregroundStyle(.tertiary)
@@ -152,29 +214,6 @@ private struct IntelSettingsSection: View {
         )
         .font(.caption)
         .foregroundStyle(.tertiary)
-
-        Toggle("MalwareBazaar hash list", isOn: $settings.mbEnabled)
-            .font(.caption)
-            .controlSize(.small)
-        Text(
-            "Downloads abuse.ch's public malware-hash list (~40 MB weekly); matching is local, and non-trusted processes are checked automatically. Community-sourced."
-        )
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-
-        Toggle("VirusTotal hash lookup", isOn: $settings.vtEnabled)
-            .font(.caption)
-            .controlSize(.small)
-        Text(
-            "Sends the executable's SHA-256 hash to VirusTotal — this reveals what you run to a third party. Needs a free API key."
-        )
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        if settings.vtEnabled {
-            SecureField("VirusTotal API key", text: $settings.vtAPIKey)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-        }
     }
 }
 

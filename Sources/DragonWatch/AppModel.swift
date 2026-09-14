@@ -44,6 +44,7 @@ struct ReviewItem: Identifiable, Sendable {
         let settings = SettingsModel()
         self.settings = settings
         intel = IntelCenter(settings: settings)
+        AppSupport.removeRetiredFiles()
     }
 
     private let processSampler = ProcessSampler()
@@ -53,6 +54,8 @@ struct ReviewItem: Identifiable, Sendable {
     private let sealVerifier = BundleSealVerifier()
     private let baseline = BaselineStore()
     private let observations = ObservationStore()
+    /// Cached per (path, mtime); the provenance queue below hashes a few binaries per tick.
+    private let hasher = FileHasher()
     private var loop: Task<Void, Never>?
     private var ticking = false
 
@@ -99,11 +102,16 @@ struct ReviewItem: Identifiable, Sendable {
         Task { [weak self] in
             guard let self else { return }
             let events = await self.observations.events()
+            // An event whose kind this build no longer has (a rule retired in
+            // an update) stays in the file until retention prunes it, but is
+            // not shown under some other rule's name and icon.
             self.alerts.seedHistory(
-                events.suffix(100).reversed().map {
-                    AlertEvent(
-                        kind: AlertKind(rawValue: $0.kind) ?? .newUntrustedProcess,
-                        title: $0.title, detail: $0.detail, date: $0.date)
+                events.suffix(100).reversed().compactMap { event in
+                    AlertKind(rawValue: event.kind).map {
+                        AlertEvent(
+                            kind: $0, title: event.title, detail: event.detail,
+                            date: event.date)
+                    }
                 })
         }
         runLoop()
@@ -359,7 +367,7 @@ struct ReviewItem: Identifiable, Sendable {
             Task { [weak self] in
                 guard let self else { return }
                 for path in toHash {
-                    guard let hash = await self.intel.hash(ofPath: path) else {
+                    guard let hash = await self.hasher.sha256(ofPath: path) else {
                         // Record the failure, or an unreadable binary sits at
                         // the head of this queue forever.
                         await self.observations.recordHashAttemptFailed(
@@ -418,30 +426,6 @@ struct ReviewItem: Identifiable, Sendable {
                         cooldown: Rule.oncePerPathCooldown,
                         title: "New persistence item",
                         detail: item, now: now)
-                }
-            }
-        }
-
-        // Local malware-hash check: exempt from "intel is on-demand only"
-        // because the list is downloaded wholesale and lookups never leave
-        // the machine. Only non-trusted processes are hashed (few, and the
-        // hasher caches), so steady-state cost is a binary search.
-        if settings.mbEnabled, settings.isEnabled(.knownMalware) {
-            let suspectPaths =
-                processes
-                .filter { $0.trust.badge != .trusted }
-                .map(\.record.path)
-            Task { [weak self] in
-                guard let self else { return }
-                await self.intel.malwareStore.refreshIfNeeded()
-                for path in await self.intel.knownMalwareHits(paths: suspectPaths) {
-                    self.raiseAndRecord(
-                        .knownMalware, key: path,
-                        cooldown: Rule.oncePerPathCooldown,
-                        title: "Known malware hash: \((path as NSString).lastPathComponent)",
-                        detail:
-                            "\(path) — SHA-256 listed in MalwareBazaar (community-sourced).",
-                        now: Date())
                 }
             }
         }

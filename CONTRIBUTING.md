@@ -14,7 +14,7 @@ Everything here applies to human and AI contributors alike.
 swift build && swift test                       # unit tests run offline
 swift format lint --strict --recursive Sources Tests   # CI gate; must be clean
 swift format --in-place --recursive Sources Tests      # apply
-./Scripts/make-app.sh                           # build/DragonWatch.app (ad-hoc signed)
+./Scripts/make-app.sh                           # build/DragonWatch.app (universal, ad-hoc signed)
 ./Scripts/make-release.sh                       # zip + SHA-256 for a release
 ```
 
@@ -28,14 +28,22 @@ on disk becomes an alert.
 
 ```sh
 open build/DragonWatch.app     # must be running; leave the popover closed
-./Scripts/verify-watcher.sh    # ~5 min
+./Scripts/verify-watcher.sh    # ~12 min; DW_SKIP_CPU=1 skips the slow case
 ```
 
-It plants three benign cases (an unsigned binary in a private temp directory,
-an inert LaunchAgent, and an ad-hoc-signed binary replaced by an unsigned one
-at the same path), reads the app's own observation ledger to confirm each
-alert fired, and removes everything it created on any exit. All three pass as
-of the last run.
+It plants five benign cases — an unsigned binary in a private temp directory,
+an inert LaunchAgent, an ad-hoc-signed binary replaced by an unsigned one at
+the same path, an ad-hoc-signed binary patched after signing, and a CPU load
+held above the alert threshold for the rule's full window — reads the app's
+own observation ledger to confirm each alert fired, and removes everything it
+created on any exit. That covers every alert kind except the network drop,
+which cannot be planted safely and has fired on real hardware.
+
+It proves the alert reached the ledger, not that a banner appeared: banners
+are gated by the per-app permission in System Settings → Notifications, which
+the app's Settings tab reports (and logs under the `notifications` category
+of the `com.dragonwatch.DragonWatch` subsystem). One install had that
+permission denied for months and the only symptom was silence.
 
 Two things it has to work around, both learned the hard way:
 
@@ -81,7 +89,8 @@ A change is not finished until all of these are true:
   goes through it, including the public intel caches: uniform beats a
   per-file judgement call about sensitivity. `AppSupportTests` enforces both
   halves, and no `Data.write`/`createDirectory` should appear outside
-  `AppSupport.swift`.
+  `AppSupport.swift` — the one exception is the user-driven history export,
+  which writes to a path the user chose and then sets 0600 on it.
 - **Closed means silent.** With the popover closed and intel off, the app makes
   no network requests at all. Anything recurring that only feeds a view must be
   gated on `popoverOpen` — see `AppModel.shouldProbeLatency`, which is unit
@@ -110,9 +119,10 @@ A change is not finished until all of these are true:
   `mtime`/`size` — both of those are settable by whoever can write the file,
   so a swapped binary kept its vouch. The fingerprint is re-checked on every
   assessment, not only when the vouch map is loaded.
-- **Intel that sends data is on-demand only.** MalwareBazaar is the one
-  background exception because matching is local. Every provider carries a
-  `privacyDisclosure` and defaults to off.
+- **Nothing about this Mac is ever sent anywhere.** Intel is on-demand only,
+  matches locally, and may download public feeds but never upload — no hash,
+  no path, no name. Every provider carries a `privacyDisclosure` and defaults
+  to off. A feature that needs to send data to work does not belong here.
 - **List order is stable** — badge severity then name; never per-sample
   numbers like CPU, which made rows jump mid-read.
 - **Every rating explains itself.** New scoring rules need matching text in

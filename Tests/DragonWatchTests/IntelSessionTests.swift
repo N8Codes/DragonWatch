@@ -11,9 +11,8 @@ final class IntelSessionTests: XCTestCase {
         IntelSession.shared.configuration
     }
 
-    /// A single `Set-Cookie` from any feed would otherwise link every KEV,
-    /// MalwareBazaar and NVD request this machine ever makes into one
-    /// persistent identity — verified previously against a local server, where
+    /// A single `Set-Cookie` from any feed would otherwise link every KEV and
+    /// NVD request this machine ever makes into one persistent identity — verified previously against a local server, where
     /// `URLSession.shared` replayed a cookie across separate process launches.
     func testSessionAcceptsNoCookies() {
         XCTAssertEqual(configuration.httpCookieAcceptPolicy, .never)

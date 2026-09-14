@@ -43,7 +43,7 @@ struct CriteriaView: View {
 
                 section("What this app deliberately does not do") {
                     bullet(
-                        "It does not inspect what a file contains or watch what a program does — ratings come from signatures and context. It does read whole binaries to hash them: a few at a time, so it can tell you when one changes on disk, and to compare against the local malware list if you enable it. The hashes stay on this Mac unless you turn on VirusTotal."
+                        "It does not inspect what a file contains or watch what a program does — ratings come from signatures and context. It does read whole binaries to hash them, a few at a time, so it can tell you when one changes on disk. The hashes never leave this Mac."
                     )
                     bullet(
                         "It never stops, kills, quarantines, or modifies another program, and never asks for elevated privileges. The only things it acts on are its own: quitting a leftover copy of itself at launch, and its own files."

@@ -43,21 +43,36 @@ final class SettingsModelTests: XCTestCase {
     func testIntelIsOffByDefault() {
         let settings = SettingsModel(defaults: defaults)
         XCTAssertFalse(settings.kevEnabled)
-        XCTAssertFalse(settings.vtEnabled)
-        XCTAssertEqual(settings.vtAPIKey, "")
     }
 
     @MainActor
     func testIntelOptInPersists() {
         let settings = SettingsModel(defaults: defaults)
         settings.kevEnabled = true
-        settings.vtEnabled = true
-        settings.vtAPIKey = "test-key"
 
         let reloaded = SettingsModel(defaults: defaults)
         XCTAssertTrue(reloaded.kevEnabled)
-        XCTAssertTrue(reloaded.vtEnabled)
-        XCTAssertEqual(reloaded.vtAPIKey, "test-key")
+    }
+
+    /// The VirusTotal key was a credential stored in plain UserDefaults. With
+    /// the feature gone nothing reads it, so the first launch of a build
+    /// without the feature must scrub it — a secret should not outlive the
+    /// code that needed it.
+    @MainActor
+    func testRetiredKeysAreScrubbedOnLoad() {
+        defaults.set("test-key", forKey: "intel.vtAPIKey")
+        defaults.set(true, forKey: "intel.vtEnabled")
+        defaults.set(true, forKey: "intel.mbEnabled")
+        defaults.set(true, forKey: "watcher.ruleDisabled.knownMalware")
+        defaults.set(true, forKey: "intel.kevEnabled")
+
+        let settings = SettingsModel(defaults: defaults)
+
+        XCTAssertNil(defaults.object(forKey: "intel.vtAPIKey"))
+        XCTAssertNil(defaults.object(forKey: "intel.vtEnabled"))
+        XCTAssertNil(defaults.object(forKey: "intel.mbEnabled"))
+        XCTAssertNil(defaults.object(forKey: "watcher.ruleDisabled.knownMalware"))
+        XCTAssertTrue(settings.kevEnabled, "live keys are untouched")
     }
 
     @MainActor

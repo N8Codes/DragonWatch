@@ -15,9 +15,13 @@ import Foundation
         }
         static let retentionDays = "history.retentionDays"
         static let kevEnabled = "intel.kevEnabled"
-        static let mbEnabled = "intel.mbEnabled"
-        static let vtEnabled = "intel.vtEnabled"
-        static let vtAPIKey = "intel.vtAPIKey"
+        /// Written by builds before 1.0 for features since removed. The
+        /// VirusTotal key in particular is a credential that must not linger
+        /// in the preferences file once nothing reads it.
+        static let retired = [
+            "intel.mbEnabled", "intel.vtEnabled", "intel.vtAPIKey",
+            "watcher.ruleDisabled.knownMalware",
+        ]
     }
 
     private let defaults: UserDefaults
@@ -45,31 +49,18 @@ import Foundation
         didSet { defaults.set(historyRetentionDays, forKey: Keys.retentionDays) }
     }
 
-    // Threat intel is strictly opt-in: every provider defaults to off, and the
-    // absent-key default reads as false with no registration needed.
+    // Threat intel is strictly opt-in: it defaults to off, and the absent-key
+    // default reads as false with no registration needed.
     var kevEnabled: Bool {
         didSet { defaults.set(kevEnabled, forKey: Keys.kevEnabled) }
-    }
-    var mbEnabled: Bool {
-        didSet { defaults.set(mbEnabled, forKey: Keys.mbEnabled) }
-    }
-    var vtEnabled: Bool {
-        didSet { defaults.set(vtEnabled, forKey: Keys.vtEnabled) }
-    }
-
-    // The user's own free-tier key. UserDefaults, not Keychain — a deliberate
-    // simplicity trade-off for a low-sensitivity, revocable key; documented
-    // in the Decisions Log.
-    var vtAPIKey: String {
-        didSet { defaults.set(vtAPIKey, forKey: Keys.vtAPIKey) }
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        for key in Keys.retired {
+            defaults.removeObject(forKey: key)
+        }
         kevEnabled = defaults.bool(forKey: Keys.kevEnabled)
-        mbEnabled = defaults.bool(forKey: Keys.mbEnabled)
-        vtEnabled = defaults.bool(forKey: Keys.vtEnabled)
-        vtAPIKey = defaults.string(forKey: Keys.vtAPIKey) ?? ""
         let storedCadence = defaults.integer(forKey: Keys.cadence)
         backgroundCadenceSeconds =
             Self.cadenceChoices.contains(storedCadence) ? storedCadence : 25

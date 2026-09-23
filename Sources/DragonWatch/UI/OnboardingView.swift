@@ -10,14 +10,14 @@ struct OnboardingView: View {
             HStack(spacing: 8) {
                 DragonEyeIcon(badge: .trusted, size: 30)
                 Text("Welcome to DragonWatch")
-                    .font(.headline)
+                    .font(AppText.headline)
             }
             .frame(maxWidth: .infinity)
 
             Text(
                 "A read-only window into what's running on your Mac, rated with macOS's own security signals. Nothing about your machine is ever sent anywhere. As it ships, the only network request DragonWatch makes is a latency check while this popover is open. The optional CISA vulnerability catalog is off; turning it on downloads a public list and matches it here, on this Mac."
             )
-            .font(.callout)
+            .font(AppText.callout)
             .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -30,13 +30,13 @@ struct OnboardingView: View {
             Text(
                 "First, a one-time sweep: anything not clearly trusted is listed for your verdict before being accepted as normal on this Mac. After that, DragonWatch quietly watches in the background and notifies you only when something changes."
             )
-            .font(.callout)
+            .font(AppText.callout)
             .foregroundStyle(.secondary)
 
             Text(
                 "The dragon eye in your menu bar is the summary — plain when all is clear, with a warning badge when something deserves a look."
             )
-            .font(.callout)
+            .font(AppText.callout)
             .foregroundStyle(.secondary)
 
             Spacer()
@@ -54,9 +54,9 @@ struct OnboardingView: View {
                 .padding(.top, 3)
             VStack(alignment: .leading, spacing: 0) {
                 Text(badge.label)
-                    .font(.callout.weight(.medium))
+                    .font(AppText.callout.weight(.medium))
                 Text(text)
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
             }
         }

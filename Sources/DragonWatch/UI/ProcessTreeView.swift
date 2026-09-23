@@ -22,7 +22,7 @@ struct ProcessTreeView: View {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if nodes.isEmpty {
                     Text("No processes to show.")
-                        .font(.callout)
+                        .font(AppText.callout)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 24)
                 }
@@ -57,7 +57,7 @@ struct ProcessTreeView: View {
                     Image(
                         systemName: collapsed.contains(node.id) ? "chevron.right" : "chevron.down"
                     )
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: 12)
                 }
@@ -74,21 +74,21 @@ struct ProcessTreeView: View {
                 HStack(spacing: 6) {
                     TrustDotView(badge: node.process.trust.badge)
                     Text(node.name)
-                        .font(.callout)
+                        .font(AppText.callout)
                         .lineLimit(1)
                     Text("pid \(String(record.pid))")
-                        .font(.caption)
+                        .font(AppText.caption)
                         .foregroundStyle(.tertiary)
                     if depth == 0, let origin = origin(of: record, lookup: lookup) {
                         Text(origin)
-                            .font(.caption)
+                            .font(AppText.caption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
                     Spacer()
                     if let started = record.startedAt {
                         Text(Self.startedLabel(started))
-                            .font(.caption.monospacedDigit())
+                            .font(AppText.caption.monospacedDigit())
                             .foregroundStyle(.tertiary)
                             .help(
                                 "Started \(started.formatted(date: .abbreviated, time: .standard))")

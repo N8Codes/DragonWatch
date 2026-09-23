@@ -14,9 +14,9 @@ struct GroupDetailView: View {
             HStack {
                 TrustDotView(badge: group.worstBadge)
                 Text(group.name)
-                    .font(.headline)
+                    .font(AppText.headline)
                 Text("\(group.members.count) processes")
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -37,7 +37,7 @@ struct GroupDetailView: View {
                     ? "Apple's own daemons, rated by their platform signature. Nested under what started them; click any row for its rating and history."
                     : "Nested under what started them. A root's arrow names its parent outside this group. Click any row for its rating and history."
             )
-            .font(.caption)
+            .font(AppText.caption)
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)

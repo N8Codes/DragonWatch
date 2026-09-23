@@ -12,10 +12,10 @@ struct ReviewView: View {
             if model.pendingReview.isEmpty && model.markedUnexpected.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "checkmark.seal")
-                        .font(.title2)
+                        .font(AppText.title2)
                         .foregroundStyle(.tertiary)
                     Text("Nothing awaiting review.")
-                        .font(.callout)
+                        .font(AppText.callout)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -26,7 +26,7 @@ struct ReviewView: View {
                             Text(
                                 "Are these expected on this Mac? \"Expected\" accepts it as normal and stops the question. \"Not expected\" keeps it listed below as one you have flagged. The eye-slash ignores it: hidden for good, no verdict either way."
                             )
-                            .font(.callout)
+                            .font(AppText.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             ForEach(model.pendingReview) { item in
@@ -37,7 +37,7 @@ struct ReviewView: View {
                         if !model.markedUnexpected.isEmpty {
                             Divider()
                             Text("You marked these as not expected")
-                                .font(.callout.weight(.medium))
+                                .font(AppText.callout.weight(.medium))
                             ForEach(model.markedUnexpected) { item in
                                 row(item, answered: true)
                             }
@@ -55,10 +55,10 @@ struct ReviewView: View {
                 TrustDotView(
                     badge: TrustScoring.base(for: item.tier))
                 Text(item.name)
-                    .font(.callout)
+                    .font(AppText.callout)
                     .lineLimit(1)
                 Text(item.tier.rawValue)
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 // The labels name the item: a screen reader hears "Expected,
@@ -93,7 +93,7 @@ struct ReviewView: View {
                 .accessibilityLabel("Ignore \(item.name)")
             }
             Text(item.path)
-                .font(.caption.monospaced())
+                .font(AppText.monoCaption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -102,14 +102,14 @@ struct ReviewView: View {
             // The reasoning belongs where the decision is made, not one
             // screen away.
             Text(TrustExplanation.signatureExplanation(item.tier))
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // So does the evidence: who started it, and whether a package
             // manager put it here, are what "expected" actually turns on.
             if let launch = item.launchedBy {
                 Label("Launched by \(launch.summary)", systemImage: "arrow.turn.down.right")
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                     .help(
                         launch.ancestryDescription ?? launch.parentPath ?? "parent already exited")
@@ -118,14 +118,14 @@ struct ReviewView: View {
                         "Started inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you",
                         systemImage: "sparkles"
                     )
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let keg = item.keg {
                 Label(keg.summary, systemImage: "shippingbox")
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
             }
         }

@@ -77,9 +77,74 @@ struct ObservationLedger: Codable, Sendable {
         case tierDowngraded(from: SignatureTier, to: SignatureTier)
     }
 
+    /// A file format this Mac has seen that the signature table does not
+    /// know, so an unknown format can be recognised as recurring rather than
+    /// reported fresh every time.
+    struct UnclassifiedFormat: Codable, Sendable, Hashable, Identifiable {
+        /// First 16 bytes as hex, which is what identifies the format.
+        let magicPrefix: String
+        /// Lowercase, no dot. Empty when the file had none.
+        let fileExtension: String
+        var firstSeen: Date
+        var lastSeen: Date
+        var timesSeen: Int
+        /// A name the user attached.
+        ///
+        /// **Annotates only.** The baseline's "expected" verdict silences a
+        /// path forever, and that would be exactly wrong here: naming a format
+        /// says what it is, not that any particular file carrying it is fine.
+        /// Structural findings are unaffected by a label.
+        var label: String?
+
+        var id: String { "\(magicPrefix)|\(fileExtension)" }
+    }
+
+    static let unclassifiedCap = 200
+
     var schemaVersion = ObservationLedger.currentSchemaVersion
     var identities: [String: Identity] = [:]
     var events: [Event] = []
+    /// Optional on purpose. Synthesised `Decodable` throws `keyNotFound` for a
+    /// missing non-optional key even when the property has a default, so a
+    /// required field here would fail to decode every `observations.json`
+    /// already on disk — and the loader treats a decode failure as an unknown
+    /// schema and moves the file aside. Adding this as non-optional would have
+    /// discarded every user's history on upgrade.
+    var unclassified: [UnclassifiedFormat]?
+
+    /// Records one sighting of an unrecognised format, keyed by its magic
+    /// bytes and extension together: the same bytes under a different
+    /// extension is a different thing to have seen.
+    mutating func observeUnclassified(magicPrefix: String, fileExtension: String, now: Date) {
+        var list = unclassified ?? []
+        if let index = list.firstIndex(where: {
+            $0.magicPrefix == magicPrefix && $0.fileExtension == fileExtension
+        }) {
+            list[index].lastSeen = now
+            list[index].timesSeen += 1
+        } else {
+            guard list.count < Self.unclassifiedCap else { return }
+            list.append(
+                UnclassifiedFormat(
+                    magicPrefix: magicPrefix, fileExtension: fileExtension,
+                    firstSeen: now, lastSeen: now, timesSeen: 1, label: nil))
+        }
+        unclassified = list
+    }
+
+    /// Attaches or clears a user's name for a format. Returns whether
+    /// anything changed, so the caller can skip a write.
+    @discardableResult
+    mutating func labelUnclassified(id: String, label: String?) -> Bool {
+        guard var list = unclassified, let index = list.firstIndex(where: { $0.id == id })
+        else { return false }
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newLabel = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        guard list[index].label != newLabel else { return false }
+        list[index].label = newLabel
+        unclassified = list
+        return true
+    }
 
     /// `launch` is recorded only on the first sighting: the parent that
     /// started the process the alert was about is the one worth keeping.

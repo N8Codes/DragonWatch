@@ -46,4 +46,24 @@ final class FileHasherTests: XCTestCase {
         XCTAssertEqual(streamed, oneShot, "streamed digest must match one-shot")
         XCTAssertEqual(streamed?.count, 64)
     }
+
+    /// Hashing used to run inside the actor with no cancellation check, so
+    /// Cancel waited for the whole file. A cancelled caller now gets nil at
+    /// the next chunk instead of a digest.
+    func testCancelledCallerGetsNoDigest() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FileHasherCancel-\(UUID().uuidString)")
+        try Data(repeating: 0x41, count: 8 << 20).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let hasher = FileHasher()
+        let task = Task { await hasher.sha256(ofPath: file.path) }
+        task.cancel()
+        let digest = await task.value
+        XCTAssertNil(digest)
+
+        // And the cache holds nothing from the abandoned read.
+        let fresh = await hasher.sha256(ofPath: file.path)
+        XCTAssertEqual(fresh?.count, 64)
+    }
 }

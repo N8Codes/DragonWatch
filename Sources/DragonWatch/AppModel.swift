@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os
 
 /// One item awaiting the user's "expected or not?" verdict.
 struct ReviewItem: Identifiable, Sendable {
@@ -70,7 +71,6 @@ struct ReviewItem: Identifiable, Sendable {
     private enum Rule {
         static let cpuWindow: TimeInterval = 180
         static let cpuCooldown: TimeInterval = 1800
-        static let networkCooldown: TimeInterval = 300
         static let latencyProbeInterval: TimeInterval = 60
         // Path-keyed alerts fire once by construction (the ledger gates them);
         // the long cooldown is belt and braces.
@@ -81,8 +81,12 @@ struct ReviewItem: Identifiable, Sendable {
     }
 
     private var cpuHistory = RingBuffer<(date: Date, value: Double)>(capacity: 64)
+    /// One line per tick with the numbers the sustained-CPU rule sees. Info
+    /// level, numbers only, so `log stream` can answer "why did it not fire"
+    /// without a rebuild — a question that once cost an evening.
+    nonisolated private static let watcherLog = Logger(
+        subsystem: "com.dragonwatch.DragonWatch", category: "watcher")
     private var latencyHistory = RingBuffer<Double>(capacity: 32)
-    private var lastNetworkUp: Bool?
     private var lastLatencyProbe = Date.distantPast
 
     func start() {
@@ -102,17 +106,7 @@ struct ReviewItem: Identifiable, Sendable {
         Task { [weak self] in
             guard let self else { return }
             let events = await self.observations.events()
-            // An event whose kind this build no longer has (a rule retired in
-            // an update) stays in the file until retention prunes it, but is
-            // not shown under some other rule's name and icon.
-            self.alerts.seedHistory(
-                events.suffix(100).reversed().compactMap { event in
-                    AlertKind(rawValue: event.kind).map {
-                        AlertEvent(
-                            kind: $0, title: event.title, detail: event.detail,
-                            date: event.date)
-                    }
-                })
+            self.alerts.seedHistory(AlertCenter.displayable(events))
         }
         runLoop()
     }
@@ -234,6 +228,195 @@ struct ReviewItem: Identifiable, Sendable {
                     })
             }
         }
+    }
+
+    // MARK: - File inspection
+
+    /// What the Inspect window is doing, if anything.
+    enum InspectionPhase: Equatable {
+        case idle
+        case walking
+        case inspecting(done: Int, total: Int)
+    }
+
+    private(set) var inspectionPhase: InspectionPhase = .idle
+    /// Formats this Mac has seen that the signature table does not know.
+    private(set) var unclassifiedFormats: [ObservationLedger.UnclassifiedFormat] = []
+    private(set) var inspectionReport: InspectionReport?
+    private let inspectionEngine = InspectionEngine()
+    private var inspectionTask: Task<Void, Never>?
+    /// Results held aside while a run that adds to them is in progress.
+    private var carriedReport: InspectionReport?
+    /// Bumped by every start and cancel; a run publishes only while its
+    /// generation is current.
+    private var inspectionGeneration = 0
+
+    var isInspecting: Bool { inspectionPhase != .idle }
+
+    /// Opens the picker and inspects whatever was chosen.
+    ///
+    /// `runModal` on a panel opened from a menu bar popover needs the app
+    /// activated first, the same dance `exportHistory` already does.
+    func chooseFilesToInspect(addingToExisting adding: Bool = false) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose files or folders to check."
+        panel.prompt = "Inspect"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        inspect(urls: panel.urls, addingToExisting: adding)
+    }
+
+    /// Inspects a selection, optionally merging into what is already on
+    /// screen rather than replacing it.
+    ///
+    /// Adding is the common case once results exist — you check one file,
+    /// then another — and having to Clear first threw away the comparison
+    /// you were making.
+    func inspect(urls: [URL], addingToExisting adding: Bool = false) {
+        guard !urls.isEmpty else { return }
+        inspectionTask?.cancel()
+        inspectionGeneration += 1
+        let generation = inspectionGeneration
+        // Results being added to are held aside while the run is in progress,
+        // so a second drop mid-run adds to them too instead of losing them.
+        carriedReport = adding ? (inspectionReport ?? carriedReport) : nil
+        let carried = carriedReport
+        inspectionReport = nil
+        inspectionPhase = .walking
+
+        inspectionTask = Task { [weak self, inspectionEngine] in
+            guard let self else { return }
+            // Expanding folders can itself take a while on a large tree, so it
+            // gets its own phase rather than looking like a hung start. Detached
+            // to leave the main actor; a detached task does not inherit
+            // cancellation, so the handler forwards it — without that, Cancel
+            // during "Finding files…" let the walk run to its limits.
+            let walkTask = Task.detached(priority: .utility) {
+                FolderWalker.walk(roots: urls, limits: .default)
+            }
+            let walk = await withTaskCancellationHandler {
+                await walkTask.value
+            } onCancel: {
+                walkTask.cancel()
+            }
+
+            // Only the current run may touch the published state: a cancelled
+            // run finishing late used to reset the phase of its replacement.
+            guard !Task.isCancelled, self.inspectionGeneration == generation else { return }
+            self.inspectionPhase = .inspecting(done: 0, total: walk.files.count)
+
+            let report = await inspectionEngine.inspect(
+                paths: walk.files,
+                roots: urls.map(\.path),
+                limitAlreadyHit: walk.limitHit,
+                folderCount: walk.folderCount,
+                progress: { [weak self] done, total in
+                    Task { @MainActor in
+                        guard let self, self.inspectionGeneration == generation else { return }
+                        self.inspectionPhase = .inspecting(done: done, total: total)
+                    }
+                })
+
+            // The engine returns a partial report when cancelled mid-run.
+            // Publishing it anyway put results on screen 1.5 s after the user
+            // pressed Cancel, and — when a second run had been started — let
+            // the abandoned run overwrite the new one's results.
+            guard !Task.isCancelled, self.inspectionGeneration == generation else { return }
+            self.inspectionReport = carried.map { Self.merge($0, report) } ?? report
+            self.carriedReport = nil
+            self.inspectionPhase = .idle
+
+            // Learn from what could not be identified. Recorded after the run
+            // so a cancelled one contributes nothing.
+            let unknown = report.files.compactMap { file -> (String, String)? in
+                guard let prefix = file.magicPrefix else { return nil }
+                return (prefix, file.declaredExtension)
+            }
+            await self.observations.observeUnclassified(unknown)
+            self.unclassifiedFormats = await self.observations.unclassifiedFormats()
+        }
+    }
+
+    /// Combines an earlier run with a new one.
+    ///
+    /// Re-inspecting the same path replaces the old entry rather than
+    /// listing it twice — a second look at a file is an update, not another
+    /// file. Roots accumulate so the report still says what was selected,
+    /// and the scope figures add up.
+    nonisolated static func merge(
+        _ existing: InspectionReport, _ incoming: InspectionReport
+    ) -> InspectionReport {
+        let replaced = Set(incoming.files.map(\.path))
+        let kept = existing.files.filter { !replaced.contains($0.path) }
+        var roots = existing.roots
+        for root in incoming.roots where !roots.contains(root) { roots.append(root) }
+        return InspectionReport(
+            generated: incoming.generated,
+            roots: roots,
+            files: kept + incoming.files,
+            limitHit: incoming.limitHit ?? existing.limitHit,
+            durationSeconds: (existing.durationSeconds ?? 0) + (incoming.durationSeconds ?? 0),
+            folderCount: (existing.folderCount ?? 0) + (incoming.folderCount ?? 0))
+    }
+
+    func cancelInspection() {
+        inspectionTask?.cancel()
+        inspectionTask = nil
+        inspectionGeneration += 1
+        // Cancelling an "add" keeps what was on screen before it started.
+        if let carriedReport { inspectionReport = carriedReport }
+        carriedReport = nil
+        inspectionPhase = .idle
+    }
+
+    /// Whether a new selection can be added to results rather than replace
+    /// them: results are on screen, or an add is in progress and holding them.
+    var canAddToInspection: Bool { inspectionReport != nil || carriedReport != nil }
+
+    func clearInspection() {
+        cancelInspection()
+        inspectionReport = nil
+    }
+
+    func loadUnclassifiedFormats() {
+        Task { [weak self] in
+            guard let self else { return }
+            self.unclassifiedFormats = await self.observations.unclassifiedFormats()
+        }
+    }
+
+    /// Names a format the app does not recognise. The name annotates; it
+    /// never suppresses a finding about a file carrying those bytes.
+    func labelUnclassifiedFormat(id: String, label: String?) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.observations.labelUnclassified(id: id, label: label)
+            self.unclassifiedFormats = await self.observations.unclassifiedFormats()
+        }
+    }
+
+    /// Saves the current report in one format.
+    ///
+    /// Written owner-only wherever the user puts it, the same rule
+    /// `exportHistory` follows: a report names every file inspected and their
+    /// hashes, which is an inventory of the machine.
+    func exportInspection(as format: ReportRenderer.Format) {
+        guard let report = inspectionReport,
+            let data = ReportRenderer.render(report, as: format)
+        else { return }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = ReportRenderer.suggestedFilename(
+            for: report, format: format)
+        panel.message = "Save the inspection report."
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     func exportHistory() {
@@ -430,6 +613,18 @@ struct ReviewItem: Identifiable, Sendable {
             }
         }
 
+        let windowed = cpuHistory.elements.filter {
+            now.timeIntervalSince($0.date) <= Rule.cpuWindow
+        }
+        Self.watcherLog.info(
+            """
+            tick cpu=\(cpu, format: .fixed(precision: 0)) \
+            windowed=\(windowed.count) \
+            span=\(windowed.first.map { now.timeIntervalSince($0.date) } ?? 0, format: .fixed(precision: 0))s \
+            min=\(windowed.map(\.value).min() ?? 0, format: .fixed(precision: 0)) \
+            threshold=\(self.settings.cpuThresholdPercent, format: .fixed(precision: 0)) \
+            popoverOpen=\(self.popoverOpen)
+            """)
         if settings.isEnabled(.sustainedCPU),
             SustainedSpikeRule.isSpiking(
                 samples: cpuHistory.elements,
@@ -449,17 +644,6 @@ struct ReviewItem: Identifiable, Sendable {
                     top.map { " — top: \($0.name)" } ?? ""),
                 now: now)
         }
-
-        if settings.isEnabled(.networkChange),
-            let last = lastNetworkUp, last != network.isUp
-        {
-            raiseAndRecord(
-                .networkChange, key: "status",
-                cooldown: Rule.networkCooldown,
-                title: network.isUp ? "Network restored" : "Network dropped",
-                detail: network.summary, now: now)
-        }
-        lastNetworkUp = network.isUp
 
         if Self.shouldProbeLatency(
             popoverOpen: popoverOpen, networkUp: network.isUp,

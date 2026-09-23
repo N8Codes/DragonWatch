@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var inspectedGroupID: String?
     @State private var expandedGroups: Set<String> = []
     @State private var searchText = ""
+    @Environment(\.openWindow) private var openWindow
 
     private var sort: ProcessListSort {
         ProcessListSort(rawValue: sortRaw) ?? .riskFirst
@@ -31,9 +32,15 @@ struct ContentView: View {
                 OnboardingView { hasOnboarded = true }
             }
         }
-        .frame(width: 460, height: 640)
+        .frame(width: AppText.popoverWidth, height: AppText.popoverHeight)
         .onAppear { model.popoverDidOpen() }
         .onDisappear { model.popoverDidClose() }
+        .onChange(of: model.pendingReview.isEmpty) { _, empty in
+            // The Review tab disappears once the queue is empty, so anyone
+            // standing on it when they answer the last item would be left
+            // looking at a tab that no longer has a button.
+            if empty, tab == .review { tab = .processes }
+        }
     }
 
     private var panel: some View {
@@ -44,10 +51,6 @@ struct ContentView: View {
             case .processes:
                 searchField
                 Divider()
-                if !model.pendingReview.isEmpty {
-                    reviewBanner
-                    Divider()
-                }
                 if model.hasSampled {
                     processList
                 } else {
@@ -94,49 +97,37 @@ struct ContentView: View {
         }
     }
 
-    private var reviewBanner: some View {
-        Button {
-            tab = .review
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "questionmark.diamond.fill")
-                    .foregroundStyle(.orange)
-                Text(
-                    "\(model.pendingReview.count) new item\(model.pendingReview.count == 1 ? "" : "s") awaiting review"
-                )
-                .font(.body)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
     private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.callout)
+                .font(AppText.callout)
                 .foregroundStyle(.secondary)
             TextField("Search apps and processes", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.callout)
+                .font(AppText.callout)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.callout)
+                        .font(AppText.callout)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help("Clear search")
                 .accessibilityLabel("Clear search")
             }
+            Divider().frame(height: 14)
+            // Beside the search field, where the eye already is, and labelled
+            // rather than relying on an icon being guessed.
+            Button {
+                openInspectWindow(openWindow)
+            } label: {
+                Label("Inspect a file", systemImage: "doc.viewfinder")
+                    .font(AppText.callout)
+            }
+            .buttonStyle(.link)
+            .help("Check whether a file is what it claims to be")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -151,7 +142,7 @@ struct ContentView: View {
             LazyVStack(spacing: 1) {
                 if visibleGroups.isEmpty {
                     Text("Nothing matches “\(searchText)”.")
-                        .font(.callout)
+                        .font(AppText.callout)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 24)
                 }
@@ -200,6 +191,21 @@ struct ContentView: View {
                         .accessibilityHidden(true)  // the label carries the count
                 }
             }
+            if !model.pendingReview.isEmpty {
+                // Only present when a verdict is actually waiting: permanent
+                // chrome for an empty queue is the clutter the banner was.
+                tabButton(
+                    .review, systemImage: "questionmark.diamond.fill",
+                    help: "Review — \(model.pendingReview.count) awaiting a verdict"
+                )
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(.orange)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 3, y: -3)
+                        .accessibilityHidden(true)  // the label carries the count
+                }
+            }
             tabButton(
                 .criteria, systemImage: "list.bullet.rectangle",
                 help: "How ratings are decided")
@@ -214,7 +220,7 @@ struct ContentView: View {
                         ? "\(model.groups.count) apps & processes"
                         : "\(visibleGroups.count) of \(model.groups.count)"
                 )
-                .font(.callout)
+                .font(AppText.callout)
                 .foregroundStyle(.secondary)
             }
             Button {
@@ -257,7 +263,7 @@ struct ContentView: View {
             .labelsHidden()
         } label: {
             Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 15))
+                .font(AppText.icon(15))
                 .foregroundStyle(.secondary)
                 .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
@@ -277,7 +283,7 @@ struct ContentView: View {
             tab = target
         } label: {
             Image(systemName: systemImage)
-                .font(.system(size: 15))
+                .font(AppText.icon(15))
                 .foregroundStyle(tab == target ? Color.accentColor : Color.secondary)
                 .frame(width: 24, height: 22)
                 .contentShape(Rectangle())

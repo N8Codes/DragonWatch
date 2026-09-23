@@ -14,6 +14,7 @@ struct SettingsView: View {
         ScrollView {
             settingsContent
         }
+        .onAppear { model.loadUnclassifiedFormats() }
     }
 
     private var settingsContent: some View {
@@ -28,7 +29,7 @@ struct SettingsView: View {
                     Text(
                         "Login item and notifications need the app bundle — build with Scripts/make-app.sh."
                     )
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.tertiary)
                 } else {
                     NotificationPermissionRow(permission: model.alerts.notificationPermission)
@@ -49,11 +50,13 @@ struct SettingsView: View {
                 }
             }
 
+            unrecognisedFormats
+
             section("Baseline") {
                 if confirmingReset {
                     HStack(spacing: 8) {
                         Text("Re-review everything running?")
-                            .font(.caption)
+                            .font(AppText.caption)
                         Button("Reset") {
                             model.resetBaseline()
                             confirmingReset = false
@@ -69,7 +72,7 @@ struct SettingsView: View {
                 Text(
                     "Wipes the ledger of known processes and the observation history, then re-runs the reviewed first-run sweep — for after installing a batch of new software."
                 )
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.tertiary)
             }
 
@@ -77,7 +80,7 @@ struct SettingsView: View {
             // no About window and the bundle's version is otherwise only
             // visible from Finder.
             Text(Self.versionLine)
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.tertiary)
                 .accessibilityLabel("Version \(Self.versionLine)")
         }
@@ -100,10 +103,34 @@ struct SettingsView: View {
         return "DragonWatch \(short)\(build)"
     }()
 
+    /// Formats this Mac has met that the signature table does not know.
+    ///
+    /// Naming one records what it is. It **annotates only** — the baseline's
+    /// "expected" verdict silences a path forever, and that would be exactly
+    /// wrong here: saying what a format is does not vouch for any file
+    /// carrying it, and every structural finding still fires.
+    @ViewBuilder
+    private var unrecognisedFormats: some View {
+        if !model.unclassifiedFormats.isEmpty {
+            section("Unrecognised formats seen here") {
+                Text(
+                    "Naming one records what it is for next time. It does not suppress any finding about a file that carries it."
+                )
+                .font(AppText.caption)
+                .foregroundStyle(.secondary)
+                ForEach(model.unclassifiedFormats) { entry in
+                    UnrecognisedFormatRow(entry: entry) { label in
+                        model.labelUnclassifiedFormat(id: entry.id, label: label)
+                    }
+                }
+            }
+        }
+    }
+
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(AppText.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             content()
         }
@@ -132,7 +159,7 @@ private struct NotificationPermissionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(message)
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(permission == .allowed ? .tertiary : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if permission != .allowed {
@@ -172,7 +199,7 @@ private struct HistorySettingsSection: View {
     var body: some View {
         HStack(spacing: 8) {
             Text("Keep alerts for")
-                .font(.caption)
+                .font(AppText.caption)
             Picker("", selection: $settings.historyRetentionDays) {
                 ForEach(SettingsModel.retentionChoices, id: \.self) { days in
                     Text("\(days) d").tag(days)
@@ -188,7 +215,7 @@ private struct HistorySettingsSection: View {
         Text(
             "DragonWatch records what it has seen — first-seen dates, hashes, signature changes, alerts — in an owner-only file in Application Support. Local-only; export writes a JSON copy where you choose."
         )
-        .font(.caption)
+        .font(AppText.caption)
         .foregroundStyle(.tertiary)
     }
 }
@@ -203,16 +230,16 @@ private struct IntelSettingsSection: View {
         Text(
             "Off by default. Runs only when you press \"Run intel checks\" on a process; matching happens on this Mac."
         )
-        .font(.caption)
+        .font(AppText.caption)
         .foregroundStyle(.tertiary)
 
         Toggle("CISA KEV catalog", isOn: $settings.kevEnabled)
-            .font(.caption)
+            .font(AppText.caption)
             .controlSize(.small)
         Text(
             "Downloads CISA's public exploited-vulnerabilities list (daily) plus NVD version data for every listed CVE. Nothing about your Mac is sent."
         )
-        .font(.caption)
+        .font(AppText.caption)
         .foregroundStyle(.tertiary)
     }
 }
@@ -234,14 +261,14 @@ private struct WatcherSettingsSection: View {
 
         HStack(spacing: 8) {
             Text("CPU alert above")
-                .font(.caption)
+                .font(AppText.caption)
             Slider(value: $settings.cpuThresholdPercent, in: 50...100, step: 5)
                 .controlSize(.small)
                 .accessibilityLabel("CPU alert threshold")
                 .accessibilityValue(
                     String(format: "%.0f percent", settings.cpuThresholdPercent))
             Text(String(format: "%.0f%%", settings.cpuThresholdPercent))
-                .font(.caption.monospacedDigit())
+                .font(AppText.caption.monospacedDigit())
                 .frame(width: 36, alignment: .trailing)
         }
 
@@ -253,8 +280,50 @@ private struct WatcherSettingsSection: View {
                     set: { settings.setEnabled(kind, $0) }
                 )
             )
-            .font(.caption)
+            .font(AppText.caption)
             .controlSize(.small)
         }
+    }
+}
+
+/// One unrecognised format, with a name the user can give it.
+///
+/// The name is held locally and written once, on Enter or when focus leaves.
+/// Binding the field straight through to the model wrote the whole ledger to
+/// disk on every keystroke, from an unstructured task per character — and
+/// because those tasks carry no ordering guarantee, a later keystroke could
+/// be persisted before an earlier one and leave a truncated name stored.
+private struct UnrecognisedFormatRow: View {
+    let entry: ObservationLedger.UnclassifiedFormat
+    let commit: (String) -> Void
+
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.fileExtension.isEmpty ? "no extension" : ".\(entry.fileExtension)")
+                .font(AppText.callout)
+            Text("\(entry.magicPrefix)  ·  seen \(entry.timesSeen)×")
+                .font(AppText.caption2)
+                .monospaced()
+                .foregroundStyle(.tertiary)
+            TextField("Name this format", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .focused($focused)
+                .onSubmit { commit(draft) }
+                .onChange(of: focused) { _, isFocused in
+                    if !isFocused { commit(draft) }
+                }
+                .accessibilityLabel(
+                    "Name for the unrecognised format \(entry.magicPrefix)")
+        }
+        .padding(.vertical, 2)
+        .onAppear { draft = entry.label ?? "" }
+        // Switching tabs tears the view down without necessarily changing
+        // focus, so without this a name typed and not submitted is lost.
+        // Committing an unchanged value is a no-op, so the extra call is free.
+        .onDisappear { commit(draft) }
     }
 }

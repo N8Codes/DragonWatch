@@ -65,7 +65,13 @@ cleanup() {
     echo "Your ledger still holds the entries these created — clear them with"
     echo "Settings → Reset Baseline, or mark them Expected in the review queue."
 }
-trap cleanup EXIT INT TERM
+# A handler for a signal must end the run. With one handler for all three, an
+# interrupted script cleaned up and then carried on: it re-planted its cases
+# into a work folder that no longer existed, skipped two of them, and left
+# sixteen CPU burners behind when it was finally killed. The EXIT trap is
+# cleared first so cleanup runs once.
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT TERM
 
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 pass() { echo "  pass: $1"; }

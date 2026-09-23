@@ -91,7 +91,7 @@ struct VitalsHeaderView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Label(caption, systemImage: icon)
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(

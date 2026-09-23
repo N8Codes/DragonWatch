@@ -23,7 +23,7 @@ struct GroupRowView: View {
                         .lineLimit(1)
                     if let hint = group.contextHint {
                         Text("· \(hint)")
-                            .font(.callout)
+                            .font(AppText.callout)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .help(
@@ -33,7 +33,7 @@ struct GroupRowView: View {
                     }
                     if group.members.count > 1 {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption)
+                            .font(AppText.caption)
                             .foregroundStyle(.secondary)
                             .help("\(group.members.count) processes — click to expand")
                     }
@@ -75,10 +75,10 @@ struct GroupRowView: View {
                         HStack(spacing: 8) {
                             TrustDotView(badge: process.trust.badge)
                             Text(process.record.name)
-                                .font(.callout)
+                                .font(AppText.callout)
                                 .lineLimit(1)
                             Text("pid \(String(process.record.pid))")
-                                .font(.caption)
+                                .font(AppText.caption)
                                 .foregroundStyle(.tertiary)
                             Spacer()
                             MetricsView(
@@ -113,7 +113,7 @@ struct GroupRowView: View {
                 .frame(width: 22, height: 22)
         } else if group.key == ProcessGrouper.systemGroupKey {
             Image(systemName: "apple.logo")
-                .font(.system(size: 15))
+                .font(AppText.icon(15))
                 .foregroundStyle(.secondary)
                 .frame(width: 22, height: 22)
                 .accessibilityHidden(true)
@@ -127,12 +127,12 @@ struct GroupRowView: View {
                 // No desktop app to borrow an icon from: a terminal with a
                 // spark — an agent working in a shell.
                 Image(systemName: "terminal")
-                    .font(.system(size: 15))
+                    .font(AppText.icon(15))
                     .foregroundStyle(.secondary)
                     .frame(width: 22, height: 22)
                     .overlay(alignment: .topTrailing) {
                         Image(systemName: "sparkle")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(AppText.icon(8, weight: .bold))
                             .foregroundStyle(Color.accentColor)
                             .offset(x: 2, y: -2)
                     }
@@ -141,7 +141,7 @@ struct GroupRowView: View {
             }
         } else {
             Image(systemName: "gearshape")
-                .font(.system(size: 15))
+                .font(AppText.icon(15))
                 .foregroundStyle(.secondary)
                 .frame(width: 22, height: 22)
         }
@@ -156,7 +156,7 @@ struct TrustDotView: View {
 
     var body: some View {
         Image(systemName: badge.symbolName)
-            .font(.system(size: 12))
+            .font(AppText.icon(12))
             .foregroundStyle(badge.color)
             .frame(width: 14, height: 14)
             .help(badge.label)
@@ -183,12 +183,12 @@ struct MetricsView: View {
         // Member rows pass no count; the empty slot keeps the CPU and memory
         // columns aligned between group and member rows.
         Text(count.map(String.init) ?? "")
-            .font(.callout.monospacedDigit())
+            .font(AppText.callout.monospacedDigit())
             .foregroundStyle(.tertiary)
             .frame(width: 32, alignment: .trailing)
             .help("Processes in this group")
         Text(cpu.map { String(format: "%.1f%%", $0) } ?? "—")
-            .font(.callout.monospacedDigit())
+            .font(AppText.callout.monospacedDigit())
             .foregroundStyle(.secondary)
             .frame(width: 62, alignment: .trailing)
             .help(
@@ -200,7 +200,7 @@ struct MetricsView: View {
                 ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory)
             } ?? "—"
         )
-        .font(.callout.monospacedDigit())
+        .font(AppText.callout.monospacedDigit())
         .foregroundStyle(.tertiary)
         .frame(width: 74, alignment: .trailing)
         .help("Memory footprint")

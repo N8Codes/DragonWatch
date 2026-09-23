@@ -36,14 +36,20 @@ an inert LaunchAgent, an ad-hoc-signed binary replaced by an unsigned one at
 the same path, an ad-hoc-signed binary patched after signing, and a CPU load
 held above the alert threshold for the rule's full window — reads the app's
 own observation ledger to confirm each alert fired, and removes everything it
-created on any exit. That covers every alert kind except the network drop,
-which cannot be planted safely and has fired on real hardware.
+created on any exit. That covers every alert kind.
 
 It proves the alert reached the ledger, not that a banner appeared: banners
 are gated by the per-app permission in System Settings → Notifications, which
 the app's Settings tab reports (and logs under the `notifications` category
 of the `com.dragonwatch.DragonWatch` subsystem). One install had that
 permission denied for months and the only symptom was silence.
+
+The watcher also logs one line per tick under the `watcher` category — the
+CPU sample and everything the sustained-CPU rule sees — so "why did it not
+fire" can be answered from `log stream --info --predicate 'subsystem ==
+"com.dragonwatch.DragonWatch" AND category == "watcher"'` without a rebuild.
+Remember the 30-minute cooldown: a run that just alerted will not alert again,
+and the script's CPU case says so rather than failing.
 
 Two things it has to work around, both learned the hard way:
 

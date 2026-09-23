@@ -21,6 +21,7 @@ import Foundation
         static let retired = [
             "intel.mbEnabled", "intel.vtEnabled", "intel.vtAPIKey",
             "watcher.ruleDisabled.knownMalware",
+            "watcher.ruleDisabled.networkChange",
         ]
     }
 

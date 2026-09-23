@@ -16,9 +16,9 @@ struct ProcessDetailView: View {
             HStack {
                 TrustDotView(badge: process.trust.badge)
                 Text(process.record.name)
-                    .font(.headline)
+                    .font(AppText.headline)
                 Text(process.trust.badge.label)
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -37,7 +37,7 @@ struct ProcessDetailView: View {
                     "This is DragonWatch itself — verified by process ID",
                     systemImage: "checkmark.circle"
                 )
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.secondary)
             }
             if let bundle = process.trust.vouchedByBundle {
@@ -45,7 +45,7 @@ struct ProcessDetailView: View {
                     "Matches \((bundle as NSString).lastPathComponent)'s verified signature seal — exactly what the vendor shipped",
                     systemImage: "checkmark.seal"
                 )
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.secondary)
             }
             row("Signature", process.trust.tier.rawValue)
@@ -76,7 +76,7 @@ struct ProcessDetailView: View {
                             "Started inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you, launched it",
                             systemImage: "sparkles"
                         )
-                        .font(.caption)
+                        .font(AppText.caption)
                         .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -140,18 +140,18 @@ struct ProcessDetailView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text("Why \(process.trust.badge.label.lowercased())?")
-                    .font(.caption.weight(.semibold))
+                    .font(AppText.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("All criteria") { showCriteria = true }
-                    .font(.caption)
+                    .font(AppText.caption)
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
             }
             ForEach(TrustExplanation.steps(for: process.trust)) { step in
                 Label {
                     Text(step.text)
-                        .font(.caption)
+                        .font(AppText.caption)
                         .foregroundStyle(step.lowered == true ? .primary : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
@@ -197,7 +197,7 @@ struct ProcessDetailView: View {
                 Text(
                     "Hashes everything \(bundleName)'s signature seals — proving this binary is exactly what the vendor shipped. Vouches only the binaries running now, not the bundle as a whole. Can take minutes for large apps."
                 )
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.tertiary)
             }
         case .running:
@@ -205,7 +205,7 @@ struct ProcessDetailView: View {
                 ProgressView()
                     .controlSize(.regular)
                 Text("Verifying \(bundleName)'s seal — large apps take minutes…")
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
             }
         case .verified:
@@ -213,14 +213,14 @@ struct ProcessDetailView: View {
                 "Seal verified — contents rate as trusted on the next refresh",
                 systemImage: "checkmark.seal.fill"
             )
-            .font(.caption)
+            .font(AppText.caption)
             .foregroundStyle(.green)
         case .failed:
             Label(
                 "Seal verification FAILED — \(bundleName)'s contents don't match its signature. Treat with suspicion.",
                 systemImage: "xmark.octagon.fill"
             )
-            .font(.caption)
+            .font(AppText.caption)
             .foregroundStyle(.red)
         }
     }
@@ -228,11 +228,11 @@ struct ProcessDetailView: View {
     private func row(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text(label)
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .trailing)
             Text(value)
-                .font(.footnote.monospaced())
+                .font(AppText.monoCaption)
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
@@ -263,7 +263,7 @@ struct IntelSectionView: View {
                     .controlSize(.regular)
                 ForEach(intel.activeDisclosures, id: \.self) { disclosure in
                     Text(disclosure)
-                        .font(.caption)
+                        .font(AppText.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -272,36 +272,36 @@ struct IntelSectionView: View {
                 ProgressView()
                     .controlSize(.regular)
                 Text("Checking…")
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
             }
         case .done(let findings):
             VStack(alignment: .leading, spacing: 3) {
                 if findings.isEmpty {
                     Text("No intel findings.")
-                        .font(.caption)
+                        .font(AppText.caption)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(findings) { finding in
                     Label {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("\(finding.providerName): \(finding.summary)")
-                                .font(.caption)
+                                .font(AppText.caption)
                             Text(finding.detail)
-                                .font(.caption)
+                                .font(AppText.caption)
                                 .foregroundStyle(.secondary)
                         }
                     } icon: {
                         Image(systemName: symbolName(for: finding.severity))
                             .foregroundStyle(color(for: finding.severity))
                     }
-                    .font(.caption)
+                    .font(AppText.caption)
                 }
             }
         case .failed(let message):
             HStack(spacing: 6) {
                 Text(message)
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                 Button("Retry") { intel.check(process) }
                     .controlSize(.regular)

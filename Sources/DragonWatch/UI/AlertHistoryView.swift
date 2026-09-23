@@ -10,10 +10,10 @@ struct AlertHistoryView: View {
             if alerts.history.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "bell.slash")
-                        .font(.title2)
+                        .font(AppText.title2)
                         .foregroundStyle(.tertiary)
                     Text("No alerts — quiet is good.")
-                        .font(.callout)
+                        .font(AppText.callout)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -43,21 +43,21 @@ struct AlertHistoryView: View {
     private func row(_ event: AlertEvent) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: event.kind.symbolName)
-                .font(.system(size: 13))
+                .font(AppText.icon(13))
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(event.title)
-                        .font(.callout)
+                        .font(AppText.callout)
                     if let technique = event.kind.attackTechnique {
                         Text(technique)
-                            .font(.caption)
+                            .font(AppText.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
                 Text(event.detail)
-                    .font(.caption)
+                    .font(AppText.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .truncationMode(.middle)
@@ -65,7 +65,7 @@ struct AlertHistoryView: View {
             }
             Spacer()
             Text(event.date.formatted(date: .omitted, time: .shortened))
-                .font(.caption)
+                .font(AppText.caption)
                 .foregroundStyle(.tertiary)
             // Per-alert dismiss. Names the alert for VoiceOver: a column of
             // identical "Dismiss, button" rows tells a screen-reader user

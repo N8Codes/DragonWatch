@@ -30,12 +30,13 @@ final class SettingsModelTests: XCTestCase {
         let settings = SettingsModel(defaults: defaults)
         settings.backgroundCadenceSeconds = 60
         settings.cpuThresholdPercent = 70
-        settings.setEnabled(.networkChange, false)
+        settings.setEnabled(.newPersistenceItem, false)
 
         let reloaded = SettingsModel(defaults: defaults)
         XCTAssertEqual(reloaded.backgroundCadenceSeconds, 60)
         XCTAssertEqual(reloaded.cpuThresholdPercent, 70)
-        XCTAssertFalse(reloaded.isEnabled(.networkChange))
+        XCTAssertFalse(reloaded.isEnabled(.newPersistenceItem))
+        // A different rule must be unaffected by that change.
         XCTAssertTrue(reloaded.isEnabled(.sustainedCPU))
     }
 

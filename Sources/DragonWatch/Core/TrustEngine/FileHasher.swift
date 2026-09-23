@@ -8,14 +8,24 @@ import Foundation
 actor FileHasher {
     private var cache: [String: (mtime: Date, digest: String)] = [:]
 
-    func sha256(ofPath path: String) -> String? {
+    func sha256(ofPath path: String) async -> String? {
         let mtime =
             ((try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate]
                 as? Date) ?? .distantPast
         if let hit = cache[path], hit.mtime == mtime {
             return hit.digest
         }
-        guard let digest = Self.sha256Data(path: path) else { return nil }
+        // Streamed off the actor: hashing inside it serialised every caller
+        // behind the current file, so four inspection workers hashed one at a
+        // time and Cancel waited for a 2 GB read to finish. The detached task
+        // is cancelled with the caller so the read stops at the next chunk.
+        let job = Task.detached(priority: .utility) { Self.sha256Data(path: path) }
+        let digest = await withTaskCancellationHandler {
+            await job.value
+        } onCancel: {
+            job.cancel()
+        }
+        guard let digest else { return nil }
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         cache[path] = (mtime, hex)
         return hex
@@ -41,6 +51,7 @@ actor FileHasher {
         var reachedEnd = false
         var failed = false
         while !reachedEnd && !failed {
+            if Task.isCancelled { return nil }
             autoreleasepool {
                 do {
                     guard let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty

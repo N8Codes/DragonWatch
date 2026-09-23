@@ -21,7 +21,10 @@ an orange or red warning badge when something deserves a look.
 ## What it is (and isn't)
 
 Makes your machine's state **visible and legible**. It is **not an antivirus** —
-macOS already runs XProtect and Gatekeeper underneath.
+macOS already runs XProtect and Gatekeeper underneath. It has no malware corpus,
+no signature feed and no cloud lookup. The file inspector does read contents,
+but only to answer whether a file is what it claims to be — never whether it is
+dangerous.
 
 - **Read-only.** Never stops, kills, quarantines, or modifies another program,
   and never asks for elevated privileges.
@@ -84,6 +87,57 @@ Aider, Copilot CLI) get their product name, and the matching desktop app's
 icon when it is installed — otherwise a terminal-with-spark glyph. Nothing
 third-party is bundled.
 
+## Inspecting a file
+
+**Inspect a file**, beside the search field, opens a window that answers one
+question about a file sitting on disk: **are these contents what the file
+claims to be?** Choose files or folders, or drag them onto the window. It is a
+window rather than a popover pane so it stays open while you pick files.
+
+It is not a malware scan and never claims to be. There is no malware corpus, no
+signature feed and no cloud lookup, and every report carries that sentence.
+Verdicts are **Consistent**, **Caution**, **Inconsistent** or **Unreadable** —
+never "clean" or "safe", because a green pass on a novel malicious file would be
+a claim the app cannot back. "Unreadable" is its own verdict so that *we could
+not look* never reads as *we looked and it was fine*.
+
+What it checks:
+
+- **Contents against the extension.** A Mach-O named `.png` is the headline
+  case. An image under another image's name is only Caution: common on the
+  web, nothing in it can run, and the name is still wrong.
+- **Data past the end of the file.** Most formats declare their own length, so
+  this is an exact byte count, not a guess — it is how a second file rides
+  inside an innocuous-looking one.
+- **Deceptive filenames.** Unicode direction overrides that make
+  `report‮fdp.exe` display as `reportexe.pdf`, zero-width characters, and
+  runnable extensions hiding behind a document one.
+- **Things that run.** PDF JavaScript and launch actions, Office macro
+  projects, script inside an SVG.
+- **Archives, from the index only.** Path traversal, lopsided expansion and
+  prepended data — read from the central directory, never extracted.
+- **Source and text.** Trojan Source (CVE-2021-42574), encoded blobs, and code
+  that decodes a string and executes it.
+- **Provenance.** C2PA Content Credentials are read and shown, including
+  whether a file declares itself AI-generated. They are **read, not verified**:
+  the signature is not checked, and credentials can be stripped by resaving.
+
+Three rules it never breaks, each enforced by tests:
+
+1. Nothing inspected is ever **executed**.
+2. Nothing is handed to a system media decoder — ImageIO and AVFoundation are
+   the historical attack surface for malicious images, so structure is parsed
+   over bounded reads instead.
+3. No archive is ever **extracted**.
+
+Structural checks on a large file are sampled: the first and last 64 KB, plus
+whatever the format's own structure declares. Hashing is the exception — a file
+is streamed end to end for its SHA-256, up to a 2 GB ceiling. Reports export as Markdown,
+JSON, PDF or plain text, written owner-only wherever you save them.
+
+Every rule, with its rationale and what it cannot tell you, is listed in the
+app's Criteria tab.
+
 ## Vitals
 
 CPU and memory, free disk space, network status with round-trip latency, live
@@ -97,7 +151,7 @@ disk on a routine tick.
 
 Watches while the popover is closed and notifies you when something changes: a
 new non-trusted process, a new LaunchAgent/LaunchDaemon, an invalid signature,
-a binary replaced in place, a sustained CPU spike, a network drop.
+a binary replaced in place, a sustained CPU spike.
 
 - **Baseline ledger** decides what counts as "new". On first run anything not
   clearly trusted is shown for your verdict — asked once, remembered forever.
@@ -187,10 +241,10 @@ shasum -a 256 -c DragonWatch-<version>.zip.sha256
 ## Contributing
 
 Issues and pull requests welcome — especially reports of an alert that should
-have fired and didn't. Every alert kind except the network drop has a planted
-test case in `Scripts/verify-watcher.sh`, and the network drop has fired for
-real; still, this has been tested by few people on few Macs, so treat a
-missing notification as a bug report worth filing, not as impossible.
+have fired and didn't. Every alert kind has a planted test case in
+`Scripts/verify-watcher.sh`; still, this has been tested by few people on few
+Macs, so treat a missing notification as a bug report worth filing, not as
+impossible.
 `CONTRIBUTING.md` has the build and test commands, how to verify the watcher,
 and the invariants a change must not break.
 

@@ -32,7 +32,6 @@ enum AlertKind: String, CaseIterable, Sendable {
     case newPersistenceItem
     case binaryReplaced
     case sustainedCPU
-    case networkChange
 
     var displayName: String {
         switch self {
@@ -41,7 +40,6 @@ enum AlertKind: String, CaseIterable, Sendable {
         case .newPersistenceItem: "New persistence item"
         case .binaryReplaced: "Binary replaced in place"
         case .sustainedCPU: "Sustained CPU spike"
-        case .networkChange: "Network drop / restore"
         }
     }
 
@@ -52,7 +50,6 @@ enum AlertKind: String, CaseIterable, Sendable {
         case .newPersistenceItem: "pin"
         case .binaryReplaced: "arrow.triangle.2.circlepath"
         case .sustainedCPU: "cpu"
-        case .networkChange: "wifi.exclamationmark"
         }
     }
 
@@ -63,7 +60,7 @@ enum AlertKind: String, CaseIterable, Sendable {
         case .newPersistenceItem: "ATT&CK T1543"  // Create/Modify System Process
         case .invalidSignature: "ATT&CK T1036.001"  // Invalid Code Signature
         case .binaryReplaced: "ATT&CK T1036"  // Masquerading
-        case .newUntrustedProcess, .sustainedCPU, .networkChange: nil
+        case .newUntrustedProcess, .sustainedCPU: nil
         }
     }
 }
@@ -83,15 +80,19 @@ struct AlertEvent: Identifiable, Sendable {
 @Observable final class AlertCenter {
     private(set) var history: [AlertEvent] = []
     private(set) var unreadCount = 0
-    private(set) var notificationPermission: NotificationPermission = .unknown
 
     nonisolated private static let log = Logger(
         subsystem: "com.dragonwatch.DragonWatch", category: "notifications")
 
+    private(set) var notificationPermission: NotificationPermission = .unknown
+
     private var throttle = AlertThrottle()
     private let notificationDelegate = ForegroundBannerDelegate()
     private let canNotify: Bool
-    private static let historyLimit = 100
+    /// `nonisolated` so it can be a default argument on `displayable`,
+    /// which is called off the main actor. Main-actor isolation on a plain
+    /// constant is an error in the Swift 6 language mode.
+    nonisolated static let historyLimit = 100
 
     /// `canNotify` defaults to "running from a real app bundle". Tests pass
     /// false: `xctest` has a bundle identifier of its own, and
@@ -155,6 +156,26 @@ struct AlertEvent: Identifiable, Sendable {
         unreadCount += 1
         postNotification(title: title, detail: detail)
         return true
+    }
+
+    /// Turns durable ledger events into displayable alerts, newest first.
+    ///
+    /// An event whose rule this build has retired — `networkChange` went away
+    /// when wifi drops stopped being treated as security events — is dropped
+    /// rather than shown under some other rule's name and icon. Old events
+    /// stay in the file until retention prunes them, so this runs on every
+    /// launch after an update, not just once.
+    /// `nonisolated`: a pure transformation over values that touches no
+    /// instance state has no reason to require the main actor.
+    nonisolated static func displayable(
+        _ events: [ObservationLedger.Event], limit: Int = AlertCenter.historyLimit
+    ) -> [AlertEvent] {
+        events.suffix(limit).reversed().compactMap { event in
+            AlertKind(rawValue: event.kind).map {
+                AlertEvent(
+                    kind: $0, title: event.title, detail: event.detail, date: event.date)
+            }
+        }
     }
 
     /// Restores past alerts (newest first) from the durable record at launch —

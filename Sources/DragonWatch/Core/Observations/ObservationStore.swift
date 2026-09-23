@@ -95,6 +95,31 @@ actor ObservationStore {
         }
     }
 
+    /// Records sightings of unrecognised formats from one inspection run.
+    func observeUnclassified(
+        _ entries: [(magicPrefix: String, fileExtension: String)],
+        now: Date = Date()
+    ) {
+        guard !entries.isEmpty else { return }
+        for entry in entries {
+            ledger.observeUnclassified(
+                magicPrefix: entry.magicPrefix, fileExtension: entry.fileExtension, now: now)
+        }
+        persist(now: now)
+    }
+
+    func unclassifiedFormats() -> [ObservationLedger.UnclassifiedFormat] {
+        // Most recently seen first, then by id so the order is total —
+        // two entries stamped in the same batch share a `lastSeen`.
+        (ledger.unclassified ?? []).sorted {
+            $0.lastSeen == $1.lastSeen ? $0.id < $1.id : $0.lastSeen > $1.lastSeen
+        }
+    }
+
+    func labelUnclassified(id: String, label: String?, now: Date = Date()) {
+        if ledger.labelUnclassified(id: id, label: label) { persist(now: now) }
+    }
+
     func identity(for path: String) -> ObservationLedger.Identity? {
         ledger.identities[path]
     }

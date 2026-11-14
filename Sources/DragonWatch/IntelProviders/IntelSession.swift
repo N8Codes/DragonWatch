@@ -8,7 +8,7 @@ import Foundation
 /// `Set-Cookie` can link every daily CISA KEV pull and every NVD lookup into
 /// a single persistent identity, and the
 /// default `User-Agent` discloses the exact macOS kernel build
-/// (`CFNetwork/… Darwin/25.5.0`) while `Accept-Language` discloses the locale.
+/// (`CFNetwork/… Darwin/x.y.z`) while `Accept-Language` discloses the locale.
 ///
 /// DragonWatch tells users that nothing about their Mac is sent to these
 /// services. This is what makes that true: no cookie storage, no persistent

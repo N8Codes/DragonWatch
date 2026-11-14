@@ -46,6 +46,36 @@ final class SignatureInspectorTests: XCTestCase {
             "a modified code page must invalidate the signature")
     }
 
+    /// The cdhash lives in the signature blob, so patching a code page leaves
+    /// it unchanged. A seal vouch compared cdhashes alone, and a vouched
+    /// binary patched in place went on reading Trusted.
+    func testPatchedExecutableLosesItsSealVouch() async throws {
+        let binary = try adHocSignedFixture(named: "vouched")
+        let recorded = try XCTUnwrap(CodeIdentity.fingerprint(path: binary.path))
+        XCTAssertEqual(
+            recorded, CodeIdentity.codeDirectoryHash(path: binary.path),
+            "a validly signed file is identified by its cdhash")
+        let engine = TrustEngine()
+        await engine.setVouchedBinaries([binary.path: (directory.path, recorded)])
+        var assessment = await engine.assess(path: binary.path)
+        XCTAssertEqual(assessment.vouchedByBundle, directory.path)
+
+        var bytes = try Data(contentsOf: binary)
+        let marker = try XCTUnwrap(bytes.range(of: Data(Self.marker.utf8)))
+        bytes[marker.lowerBound] = UInt8(ascii: "X")
+        let handle = try FileHandle(forWritingTo: binary)  // in place: same inode
+        try handle.write(contentsOf: bytes)
+        try handle.close()
+
+        XCTAssertEqual(
+            CodeIdentity.codeDirectoryHash(path: binary.path), recorded,
+            "precondition: the patch leaves the cdhash itself untouched")
+        XCTAssertNotEqual(CodeIdentity.fingerprint(path: binary.path), recorded)
+        assessment = await engine.assess(path: binary.path)
+        XCTAssertNil(assessment.vouchedByBundle)
+        XCTAssertNotEqual(assessment.badge, .trusted)
+    }
+
     /// Ground truth comes from `codesign`, not from an assumption about what
     /// the linker emits. On Apple Silicon every binary is ad-hoc signed at
     /// link time, so a freshly compiled fixture is `.adHoc` there and

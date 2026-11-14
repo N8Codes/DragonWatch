@@ -67,7 +67,9 @@ enum JUMBF {
                     data, from: payloadStart, to: boxEnd, label: currentLabel,
                     depth: depth + 1, budget: &budget, into: &found)
             case "cbor":
-                if let currentLabel, payloadStart < boxEnd, found[currentLabel] == nil {
+                // Last wins: the active manifest is the last in the store,
+                // and earlier ones describe ingredients.
+                if let currentLabel, payloadStart < boxEnd {
                     let base = data.startIndex
                     found[currentLabel] = Data(data[(base + payloadStart)..<(base + boxEnd)])
                 }
@@ -99,25 +101,68 @@ enum JUMBF {
 
     // MARK: - Finding the JUMBF inside a container
 
-    /// Extracts the JUMBF payload a file carries, or `nil` when it has none.
-    ///
-    /// Only the head window is available, so a manifest larger than that is
-    /// reported as truncated by the caller rather than parsed half-way.
+    /// Whether this reader knows where the format keeps a manifest. Other
+    /// formats can carry one too (GIF, TIFF, RIFF); for those nothing is
+    /// looked for, and nothing is claimed.
+    static func canCarry(_ format: FileFormat?) -> Bool {
+        format.map(StructureWalker.supports) ?? false
+    }
+
+    /// Extracts the JUMBF payload from the head window, or `nil` when it
+    /// holds none. The fallback for a probe with no structure walk: a
+    /// manifest that runs past the window is not found here.
     static func payload(probe: FileProbe, format: FileFormat?) -> Data? {
+        guard let format else { return nil }
         switch format {
         case MagicBytes.jpeg: return jpegPayload(probe.head)
         case MagicBytes.png: return pngPayload(probe.head)
-        case MagicBytes.heic, MagicBytes.avif, MagicBytes.mp4, MagicBytes.mov, MagicBytes.m4a:
-            return isoPayload(probe)
-        default: return nil
+        default: return StructureWalker.isISOMedia(format) ? isoPayload(probe) : nil
         }
     }
 
-    /// JPEG carries JUMBF in `APP11` segments. A manifest too large for one
-    /// 64 KB segment is split across several, each repeating an eight-byte
-    /// header, and the box data is the concatenation in packet order.
+    /// One JPEG `APP11` segment carrying part of a JUMBF box (JPEG XT,
+    /// ISO/IEC 18477-3): the identifier "JP", a two-byte box instance, a
+    /// four-byte packet sequence, then the box bytes. **Every** segment
+    /// repeats the box's length and type ahead of its share of the payload.
+    struct APP11Segment: Sendable, Equatable {
+        let instance: UInt16
+        let sequence: UInt32
+        /// From the box length field onward.
+        let body: [UInt8]
+
+        /// `content` is the segment after its two-byte length.
+        init?(content: [UInt8]) {
+            guard content.count > 16, content[0] == 0x4A, content[1] == 0x50 else { return nil }
+            instance = UInt16(content[2]) << 8 | UInt16(content[3])
+            sequence =
+                UInt32(content[4]) << 24 | UInt32(content[5]) << 16 | UInt32(content[6]) << 8
+                | UInt32(content[7])
+            body = Array(content[8...])
+        }
+    }
+
+    /// Reassembles the boxes split across `APP11` segments: grouped by box
+    /// instance, ordered by packet sequence, with the repeated box header
+    /// kept from the first packet only.
+    static func assemble(_ segments: [APP11Segment]) -> Data? {
+        guard !segments.isEmpty else { return nil }
+        var result = Data()
+        for instance in Set(segments.map(\.instance)).sorted() {
+            let packets = segments.filter { $0.instance == instance }
+                .sorted { $0.sequence < $1.sequence }
+            for (index, packet) in packets.enumerated() {
+                // LBox and TBox, plus XLBox when LBox is 1.
+                let isExtended = packet.body.prefix(4) == [0, 0, 0, 1]
+                let repeated = isExtended ? 16 : 8
+                result.append(
+                    contentsOf: index == 0 ? packet.body[...] : packet.body.dropFirst(repeated))
+            }
+        }
+        return result
+    }
+
     static func jpegPayload(_ head: Data) -> Data? {
-        var segments: [(sequence: UInt32, body: Data)] = []
+        var segments: [APP11Segment] = []
         var offset = 2
         var guardCount = 0
 
@@ -136,28 +181,15 @@ enum JUMBF {
             }
             let contentStart = offset + 4
             let contentEnd = offset + 2 + Int(length)
-
-            // "JP" identifier, two-byte box instance, four-byte packet
-            // sequence, then the box bytes.
-            if kind == 0xEB, contentEnd <= head.count, contentEnd - contentStart > 8,
-                ByteReader.byte(head, at: contentStart) == 0x4A,
-                ByteReader.byte(head, at: contentStart + 1) == 0x50,
-                let sequence = ByteReader.uint32BE(head, at: contentStart + 4)
-            {
+            if kind == 0xEB, contentEnd <= head.count {
                 let base = head.startIndex
-                segments.append(
-                    (sequence, Data(head[(base + contentStart + 8)..<(base + contentEnd)])))
+                let content = [UInt8](head[(base + contentStart)..<(base + contentEnd)])
+                if let segment = APP11Segment(content: content) { segments.append(segment) }
             }
             offset = contentEnd
             if offset >= head.count { break }
         }
-
-        guard !segments.isEmpty else { return nil }
-        // Sorted by packet sequence, which is the order the writer intended
-        // — segments arrive in file order today, but the field exists so that
-        // is not guaranteed.
-        return segments.sorted { $0.sequence < $1.sequence }
-            .reduce(into: Data()) { $0.append($1.body) }
+        return assemble(segments)
     }
 
     /// PNG carries JUMBF in a `caBX` chunk.
@@ -182,17 +214,36 @@ enum JUMBF {
         return nil
     }
 
-    /// ISO base media carries it in a top-level `jumb` box, which the shared
-    /// box walk already enumerates.
+    /// The manifest store inside a C2PA `uuid` box, given the box body from
+    /// its extended type onward: the 16-byte type, a FullBox version and
+    /// flags, a NUL-terminated purpose, and — for `manifest` — an eight-byte
+    /// offset to any auxiliary box, then the JUMBF itself (C2PA
+    /// specification, "Embedding manifests into BMFF-based assets").
+    static func manifestStore(inC2PABox body: [UInt8]) -> Data? {
+        guard body.count > 20, Array(body.prefix(16)) == StructureWalker.c2paBoxUUID else {
+            return nil
+        }
+        let purposeStart = 20
+        guard let terminator = body[purposeStart...].prefix(32).firstIndex(of: 0),
+            Array(body[purposeStart..<terminator]) == Array("manifest".utf8),
+            terminator + 9 < body.count
+        else { return nil }
+        return Data(body[(terminator + 9)...])
+    }
+
+    /// ISO base media carries the manifest in a top-level `uuid` box. Only a
+    /// box that lies wholly inside the head window is found here.
     static func isoPayload(_ probe: FileProbe) -> Data? {
         let walk = ContainerStructure.isoBoxes(head: probe.head, fileSize: probe.size)
-        guard let box = walk.boxes.first(where: { $0.type == "jumb" }),
-            box.offset >= 0, box.offset <= Int64(Int.max), box.size <= Int64(Int.max)
-        else { return nil }
-        let start = Int(box.offset)
-        let length = Int(box.size)
-        guard ByteReader.fits(length, at: start, in: probe.head) else { return nil }
-        let base = probe.head.startIndex
-        return Data(probe.head[(base + start)..<(base + start + length)])
+        for box in walk.boxes where box.type == "uuid" || box.type == "jumb" {
+            guard box.offset <= Int64(Int.max), box.size <= Int64(Int.max),
+                ByteReader.fits(Int(box.size), at: Int(box.offset), in: probe.head)
+            else { continue }
+            let base = probe.head.startIndex + Int(box.offset)
+            let bytes = [UInt8](probe.head[base..<(base + Int(box.size))])
+            if box.type == "jumb" { return Data(bytes) }
+            if let store = manifestStore(inC2PABox: Array(bytes.dropFirst(8))) { return store }
+        }
+        return nil
     }
 }

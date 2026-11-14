@@ -265,8 +265,12 @@ final class FileInspectorTests: XCTestCase {
         // walk added in Phase 2 correctly called truncated — a fixture that
         // was never a shape production produces.
         let honest = dir.appendingPathComponent("real.jpg")
-        try (jpegHeader + Data(repeating: 0x11, count: 512) + Data([0xFF, 0xD9]))
-            .write(to: honest)
+        // SOI, an APP0 segment, a scan header, scan data, EOI: a chain the
+        // structure walk can follow, which a header plus filler is not.
+        var jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]) + Data(repeating: 0, count: 14)
+        jpeg += Data([0xFF, 0xDA, 0x00, 0x08]) + Data(repeating: 0, count: 6)
+        jpeg += Data(repeating: 0x11, count: 512) + Data([0xFF, 0xD9])
+        try jpeg.write(to: honest)
 
         let liar = dir.appendingPathComponent("fake.png")
         try (machOHeader + Data(repeating: 0x22, count: 512)).write(to: liar)
@@ -550,7 +554,7 @@ final class FileInspectorTests: XCTestCase {
             .appendingPathComponent("Mislabel-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let file = dir.appendingPathComponent("USS.png")
+        let file = dir.appendingPathComponent("mislabelled.png")
         try (Data("GIF89a".utf8) + Data(repeating: 0, count: 64) + Data([0x3B])).write(to: file)
 
         let report = await InspectionEngine().inspect(paths: [file.path], hashFiles: false)

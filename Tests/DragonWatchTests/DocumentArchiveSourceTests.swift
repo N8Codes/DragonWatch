@@ -119,16 +119,16 @@ final class DocumentArchiveSourceTests: XCTestCase {
 
     /// `/OpenAction` alone is a *view destination* — "open at page one, this
     /// zoom" — emitted by nearly every PDF writer. Flagging it condemned 26
-    /// of 60 real documents, including resumes and tax returns.
+    /// of 60 ordinary documents.
     func testBareOpenActionIsNotActiveContent() {
         let pdf = Data("%PDF-1.7\n/OpenAction[1 0 R /XYZ null null 0]\ntrailer\n%%EOF".utf8)
-        XCTAssertTrue(rules(DocumentInspector().pdf(probe(pdf, name: "resume.pdf"))).isEmpty)
+        XCTAssertTrue(rules(DocumentInspector().pdf(probe(pdf, name: "letter.pdf"))).isEmpty)
     }
 
-    /// `/AA` was matching font subset names like `/AAAAAA+Montserrat-Regular`.
+    /// `/AA` was matching font subset names like `/AAAAAA+ExampleSans-Regular`.
     /// Three characters cannot carry a security signal.
     func testFontSubsetNamesAreNotMistakenForActions() {
-        let pdf = Data("%PDF-1.7\n/BaseFont/AAAAAA+Montserrat-Regular\ntrailer\n%%EOF".utf8)
+        let pdf = Data("%PDF-1.7\n/BaseFont/AAAAAA+ExampleSans-Regular\ntrailer\n%%EOF".utf8)
         XCTAssertTrue(rules(DocumentInspector().pdf(probe(pdf, name: "b.pdf"))).isEmpty)
     }
 

@@ -33,6 +33,9 @@ enum ArchiveInspector {
         /// The index begins before the sampled tail window, so no entry could
         /// be read. A limit of the sampling, not a property of the archive.
         var indexBeyondWindow = false
+        /// The record holds ZIP64 placeholders: the real count and offsets
+        /// live in a ZIP64 record this reader does not parse.
+        var zip64 = false
     }
 
     /// At most this many entries are read. A directory listing thousands of
@@ -68,6 +71,10 @@ enum ArchiveInspector {
         guard let directorySize = ByteReader.uint32LE(window, at: eocd + 12),
             let directoryOffset = ByteReader.uint32LE(window, at: eocd + 16)
         else { return directory }
+        if directory.declaredCount == 0xFFFF || directorySize == .max || directoryOffset == .max {
+            directory.zip64 = true
+            return directory
+        }
 
         // The recorded offset is relative to the start of the archive, so the
         // difference from where it actually sits is the size of anything
@@ -100,15 +107,14 @@ enum ArchiveInspector {
             var name = ""
             if nameLength > 0, cursor + 46 + nameLength <= window.count {
                 let start = window.startIndex + cursor + 46
-                name =
-                    String(data: window[start..<(start + nameLength)], encoding: .utf8)
-                    ?? ""
+                // Lossy on purpose: a strict decode turned a name with one
+                // invalid byte into "", which hid `../` from the path check.
+                name = String(decoding: window[start..<(start + nameLength)], as: UTF8.self)
             }
             directory.entries.append(
                 Entry(name: name, compressedSize: compressed, uncompressedSize: uncompressed))
 
             let advance = 46 + nameLength + extraLength + commentLength
-            guard advance > 0 else { break }
             cursor += advance
         }
         return directory
@@ -135,6 +141,15 @@ enum ArchiveInspector {
             return output
         }
 
+        if directory.zip64 {
+            output.disclosures.append(
+                Disclosure(
+                    title: "Index not examined",
+                    detail:
+                        "This is a ZIP64 archive, whose index DragonWatch does not read, so "
+                        + "entry paths, sizes and ratios were not checked. Nothing was extracted."))
+            return output
+        }
         output.disclosures.append(
             Disclosure(
                 title: "Archive contents",

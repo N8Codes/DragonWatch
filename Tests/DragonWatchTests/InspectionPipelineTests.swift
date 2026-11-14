@@ -35,15 +35,15 @@ final class InspectionPipelineTests: XCTestCase {
         return folder
     }
 
-    private func waitForReport(_ model: AppModel, timeout: Duration = .seconds(20)) async
+    private func waitForReport(_ model: InspectionModel, timeout: Duration = .seconds(20)) async
         -> InspectionReport?
     {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
-            if let report = model.inspectionReport, !model.isInspecting { return report }
+            if let report = model.report, !model.isInspecting { return report }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        return model.inspectionReport
+        return model.report
     }
 
     /// Adding to results while a previous add is still running dropped the
@@ -53,36 +53,36 @@ final class InspectionPipelineTests: XCTestCase {
         let a = try file("a.txt")
         let b = try file("b.txt")
         let c = try file("c.txt")
-        let model = AppModel()
+        let model = AppModel.isolated(for: self).inspection
 
         model.inspect(urls: [a])
         let first = await waitForReport(model)
         XCTAssertNotNil(first)
 
         model.inspect(urls: [b], addingToExisting: true)
-        XCTAssertNil(model.inspectionReport, "results are held aside during the run")
-        XCTAssertTrue(model.canAddToInspection, "the view must still offer to add")
-        model.inspect(urls: [c], addingToExisting: model.canAddToInspection)
+        XCTAssertNil(model.report, "results are held aside during the run")
+        XCTAssertTrue(model.canAdd, "the view must still offer to add")
+        model.inspect(urls: [c], addingToExisting: model.canAdd)
 
         let merged = await waitForReport(model)
         let report = try XCTUnwrap(merged)
         let names = report.files.map(\.displayName).sorted()
         XCTAssertEqual(names, ["a.txt", "c.txt"], "a is kept, b was replaced before it ran")
-        XCTAssertTrue(model.canAddToInspection)
+        XCTAssertTrue(model.canAdd)
     }
 
     /// Cancelling an add restores what was on screen before it started.
     func testCancellingAnAddRestoresTheKeptResults() async throws {
         let a = try file("a.txt")
         let big = try bigFolder("big")
-        let model = AppModel()
+        let model = AppModel.isolated(for: self).inspection
         model.inspect(urls: [a])
         let published = await waitForReport(model)
         let first = try XCTUnwrap(published)
 
         model.inspect(urls: [big], addingToExisting: true)
-        model.cancelInspection()
-        XCTAssertEqual(model.inspectionReport?.files.map(\.path), first.files.map(\.path))
+        model.cancel()
+        XCTAssertEqual(model.report?.files.map(\.path), first.files.map(\.path))
         XCTAssertFalse(model.isInspecting)
     }
 
@@ -92,14 +92,14 @@ final class InspectionPipelineTests: XCTestCase {
     func testAbandonedRunNeverTouchesTheReplacementsState() async throws {
         let big = try bigFolder("big")
         let small = try file("small.txt")
-        let model = AppModel()
+        let model = AppModel.isolated(for: self).inspection
 
         model.inspect(urls: [big])
         for _ in 0..<400 {
-            if case .inspecting = model.inspectionPhase { break }
+            if case .inspecting = model.phase { break }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        guard case .inspecting = model.inspectionPhase else {
+        guard case .inspecting = model.phase else {
             throw XCTSkip("the big run finished before it could be replaced")
         }
 
@@ -107,26 +107,26 @@ final class InspectionPipelineTests: XCTestCase {
         // While the replacement has not published, the phase must never read
         // idle — that is exactly what the abandoned run used to do to it.
         let deadline = ContinuousClock.now + .seconds(20)
-        while model.inspectionReport == nil, ContinuousClock.now < deadline {
-            XCTAssertNotEqual(model.inspectionPhase, .idle, "phase reset by the abandoned run")
+        while model.report == nil, ContinuousClock.now < deadline {
+            XCTAssertNotEqual(model.phase, .idle, "phase reset by the abandoned run")
             try? await Task.sleep(for: .milliseconds(2))
         }
-        let report = try XCTUnwrap(model.inspectionReport)
+        let report = try XCTUnwrap(model.report)
         XCTAssertEqual(report.files.map(\.displayName), ["small.txt"])
-        XCTAssertEqual(model.inspectionPhase, .idle)
+        XCTAssertEqual(model.phase, .idle)
     }
 
     /// Clear after an add leaves nothing behind to be "added to".
     func testClearDropsCarriedResultsToo() async throws {
         let a = try file("a.txt")
         let big = try bigFolder("big", count: 200)
-        let model = AppModel()
+        let model = AppModel.isolated(for: self).inspection
         model.inspect(urls: [a])
         let first = await waitForReport(model)
         XCTAssertNotNil(first)
         model.inspect(urls: [big], addingToExisting: true)
-        model.clearInspection()
-        XCTAssertNil(model.inspectionReport)
-        XCTAssertFalse(model.canAddToInspection)
+        model.clear()
+        XCTAssertNil(model.report)
+        XCTAssertFalse(model.canAdd)
     }
 }

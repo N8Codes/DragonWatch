@@ -75,7 +75,11 @@ actor BundleSealVerifier {
     /// Verifies the bundle's seal and, on success, vouches exactly the
     /// binaries named by the caller (the flagged executables the user is
     /// resolving). Returns whether verification passed.
+    ///
+    /// A seal says nothing about a file outside the bundle, so such a path is
+    /// never vouched whatever the caller passes.
     func verify(bundlePath: String, vouching binaryPaths: [String]) async -> Bool {
+        let binaryPaths = binaryPaths.filter { $0.hasPrefix(bundlePath + "/") }
         // Pin the identities *before* validation and confirm them after.
         // Validating a large bundle takes minutes, and recording identities
         // only on the way out would vouch whatever is on disk when it

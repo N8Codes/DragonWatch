@@ -105,7 +105,7 @@ final class InspectionRulebookTests: XCTestCase {
     }
 
     private static func zip(entries: [(name: String, compressed: Int, uncompressed: Int)]) -> Data {
-        var local: [UInt8] = [0x50, 0x4B, 0x03, 0x04] + [UInt8](repeating: 0, count: 26)
+        let local: [UInt8] = [0x50, 0x4B, 0x03, 0x04] + [UInt8](repeating: 0, count: 26)
         var central: [UInt8] = []
         for entry in entries {
             central += [0x50, 0x4B, 0x01, 0x02] + [UInt8](repeating: 0, count: 16)

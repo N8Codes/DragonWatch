@@ -83,9 +83,21 @@ actor VitalsSampler {
         }
         guard result == KERN_SUCCESS else { return 0 }
         let pageSize = UInt64(vm_kernel_page_size)
-        // "Used" the way Activity Monitor means it: app + wired + compressed.
-        return
-            (UInt64(stats.active_count) + UInt64(stats.wire_count)
-            + UInt64(stats.compressor_page_count)) * pageSize
+        return Self.memoryUsed(
+            anonymous: UInt64(stats.internal_page_count),
+            purgeable: UInt64(stats.purgeable_count), wired: UInt64(stats.wire_count),
+            compressed: UInt64(stats.compressor_page_count), pageSize: pageSize)
+    }
+
+    /// "Used" the way Activity Monitor means it: app memory, wired and
+    /// compressed — where app memory is anonymous pages less the purgeable
+    /// ones. `active_count` was used for it before; that counts recently
+    /// touched file cache and misses idle app memory, and read 4 GB low
+    /// against the same machine.
+    static func memoryUsed(
+        anonymous: UInt64, purgeable: UInt64, wired: UInt64, compressed: UInt64,
+        pageSize: UInt64
+    ) -> UInt64 {
+        (anonymous - min(purgeable, anonymous) + wired + compressed) * pageSize
     }
 }

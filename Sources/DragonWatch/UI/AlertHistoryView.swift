@@ -4,6 +4,7 @@ import SwiftUI
 struct AlertHistoryView: View {
     @Environment(AppModel.self) private var model
     let alerts: AlertCenter
+    @State private var confirmingClear = false
 
     var body: some View {
         Group {
@@ -25,9 +26,21 @@ struct AlertHistoryView: View {
                             // Through the model, not the AlertCenter: the
                             // durable copy has to go too, or "Clear" undoes
                             // itself on the next launch.
-                            Button("Clear") { model.clearAlertHistory() }
+                            if confirmingClear {
+                                Text("Erase every alert?")
+                                    .font(AppText.caption)
+                                Button("Erase") {
+                                    model.watcher.clearAlertHistory()
+                                    confirmingClear = false
+                                }
                                 .controlSize(.regular)
-                                .accessibilityLabel("Clear alert history")
+                                Button("Cancel") { confirmingClear = false }
+                                    .controlSize(.regular)
+                            } else {
+                                Button("Clear…") { confirmingClear = true }
+                                    .controlSize(.regular)
+                                    .accessibilityLabel("Clear alert history")
+                            }
                         }
                         ForEach(alerts.history) { event in
                             row(event)
@@ -38,6 +51,9 @@ struct AlertHistoryView: View {
             }
         }
         .onAppear { alerts.markAllRead() }
+        .onChange(of: alerts.unreadCount) { _, unread in
+            if unread > 0 { alerts.markAllRead() }
+        }
     }
 
     private func row(_ event: AlertEvent) -> some View {
@@ -64,14 +80,16 @@ struct AlertHistoryView: View {
                     .help(event.detail)
             }
             Spacer()
-            Text(event.date.formatted(date: .omitted, time: .shortened))
+            // History spans months; a bare time of day would read as today.
+            Text(ProcessTreeView.startedLabel(event.date))
+                .help(event.date.formatted(date: .abbreviated, time: .standard))
                 .font(AppText.caption)
                 .foregroundStyle(.tertiary)
             // Per-alert dismiss. Names the alert for VoiceOver: a column of
             // identical "Dismiss, button" rows tells a screen-reader user
             // nothing about which one they are about to remove.
             Button {
-                model.dismissAlert(event)
+                model.watcher.dismissAlert(event)
             } label: {
                 Image(systemName: "xmark.circle")
                     .foregroundStyle(.tertiary)

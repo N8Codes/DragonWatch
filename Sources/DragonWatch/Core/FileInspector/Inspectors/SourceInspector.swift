@@ -16,7 +16,7 @@ enum SourceInspector {
         "swift", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "rb", "pl", "php",
         "sh", "bash", "zsh", "fish", "c", "h", "cpp", "hpp", "cc", "m", "mm",
         "java", "kt", "kts", "go", "rs", "cs", "scala", "lua", "r", "sql",
-        "ps1", "psm1", "bat", "cmd", "vbs", "applescript", "scpt",
+        "ps1", "psm1", "bat", "cmd", "vbs", "applescript",
         "html", "htm", "css", "json", "yaml", "yml", "toml", "xml", "md", "txt",
     ]
 
@@ -30,7 +30,13 @@ enum SourceInspector {
     static func inspect(probe: FileProbe) -> InspectorOutput {
         var output = InspectorOutput()
         output.checks.append("Text encoding, hidden characters and obfuscation")
-        guard let text = String(data: probe.head.prefix(1 << 18), encoding: .utf8) else {
+        // The window can end mid-character on a longer file; up to three
+        // trailing bytes are dropped before calling valid UTF-8 "not text".
+        let cut = probe.size > Int64(probe.head.count) ? 3 : 0
+        guard
+            let text = (0...cut).lazy
+                .compactMap({ String(data: probe.head.dropLast($0), encoding: .utf8) }).first
+        else {
             // Something with a source extension that is not UTF-8 text is
             // worth saying, since every check below assumes it is.
             output.findings.append(

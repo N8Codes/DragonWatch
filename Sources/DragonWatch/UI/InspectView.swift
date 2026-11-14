@@ -16,9 +16,9 @@ struct InspectView: View {
         VStack(spacing: 0) {
             disclaimer
             Divider()
-            if model.isInspecting {
+            if model.inspection.isInspecting {
                 progress
-            } else if let report = model.inspectionReport {
+            } else if let report = model.inspection.report {
                 summary(report)
                 Divider()
                 results(report)
@@ -29,7 +29,7 @@ struct InspectView: View {
         .dropDestination(for: URL.self) { urls, _ in
             // Dropping while results are on screen adds to them; the first
             // drop onto an empty window starts a run.
-            model.inspect(urls: urls, addingToExisting: model.canAddToInspection)
+            model.inspection.inspect(urls: urls, addingToExisting: model.inspection.canAdd)
             return true
         } isTargeted: {
             isDropTarget = $0
@@ -74,7 +74,7 @@ struct InspectView: View {
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 24)
-            Button("Choose Files or Folders…") { model.chooseFilesToInspect() }
+            Button("Choose Files or Folders…") { model.inspection.chooseFiles() }
                 .controlSize(.regular)
             Text("or drag them here")
                 .font(AppText.caption)
@@ -86,7 +86,7 @@ struct InspectView: View {
     private var progress: some View {
         VStack(spacing: 10) {
             Spacer()
-            switch model.inspectionPhase {
+            switch model.inspection.phase {
             case .walking:
                 ProgressView().controlSize(.small)
                 Text("Finding files…").font(AppText.callout)
@@ -99,7 +99,7 @@ struct InspectView: View {
             case .idle:
                 EmptyView()
             }
-            Button("Cancel") { model.cancelInspection() }
+            Button("Cancel") { model.inspection.cancel() }
                 .controlSize(.small)
             Spacer()
         }
@@ -118,12 +118,12 @@ struct InspectView: View {
                 Text(headline(report))
                     .font(AppText.headline)
                 Spacer()
-                Button("Add Files…") { model.chooseFilesToInspect(addingToExisting: true) }
+                Button("Add Files…") { model.inspection.chooseFiles(addingToExisting: true) }
                     .controlSize(.small)
                     .help("Inspect more files and keep these results")
                 Menu("Export") {
                     ForEach(ReportRenderer.Format.allCases, id: \.rawValue) { format in
-                        Button("\(format.label)…") { model.exportInspection(as: format) }
+                        Button("\(format.label)…") { model.inspection.export(as: format) }
                     }
                 }
                 .menuStyle(.borderlessButton)
@@ -131,7 +131,7 @@ struct InspectView: View {
                 .controlSize(.small)
                 .help("Save this report as Markdown, JSON, PDF or plain text")
                 .accessibilityLabel("Export report")
-                Button("Clear") { model.clearInspection() }
+                Button("Clear") { model.inspection.clear() }
                     .controlSize(.small)
             }
             Text(countsLine(report))
@@ -157,9 +157,12 @@ struct InspectView: View {
     private func headline(_ report: InspectionReport) -> String {
         let count = report.files.count
         let files = "\(count) item\(count == 1 ? "" : "s")"
+        guard count > 0 else { return "Nothing to inspect" }
         switch report.worstVerdict {
         case .consistent: return "\(files) — all consistent"
-        case .unreadable: return "\(files) — nothing could be read"
+        case .unreadable:
+            return report.count(of: .unreadable) == count
+                ? "\(files) — nothing could be read" : "\(files) — some could not be read"
         case .caution: return "\(files) — worth a look"
         case .inconsistent: return "\(files) — something does not match"
         }

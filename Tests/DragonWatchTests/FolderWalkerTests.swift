@@ -211,21 +211,21 @@ final class FolderWalkerTests: XCTestCase {
                 .write(to: dir.appendingPathComponent("s\(index).bin"))
         }
 
-        let model = AppModel()
+        let model = AppModel.isolated(for: self).inspection
         model.inspect(urls: [dir])
         // Cancel only once the walk is done and the engine is actually running,
         // which is the path that used to publish.
         for _ in 0..<400 {
-            if case .inspecting = model.inspectionPhase { break }
+            if case .inspecting = model.phase { break }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        guard case .inspecting = model.inspectionPhase else {
+        guard case .inspecting = model.phase else {
             throw XCTSkip("run finished before it could be cancelled mid-engine")
         }
-        model.cancelInspection()
+        model.cancel()
 
         try? await Task.sleep(for: .milliseconds(1500))
-        XCTAssertNil(model.inspectionReport, "a cancelled run must not publish results")
+        XCTAssertNil(model.report, "a cancelled run must not publish results")
         XCTAssertFalse(model.isInspecting)
     }
 

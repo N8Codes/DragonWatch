@@ -110,7 +110,9 @@ enum TrustExplanation {
         case .invalid:
             "The signature is present but does not validate: the file has been modified since signing, or its certificate was revoked."
         case .osManagedUnreadable:
-            "Part of the macOS install, in a directory that only root can write and System Integrity Protection guards. DragonWatch runs as you, so it cannot read the file to check the signature — this rating comes from where the file lives, not from verifying it."
+            "Managed by macOS — part of the system install, or a service macOS staged to run — in a directory that only root can write and System Integrity Protection guards. DragonWatch runs as you, so it cannot read the file to check the signature — this rating comes from where the file lives, not from verifying it."
+        case .executableMissing:
+            "The file this process was started from is no longer on disk, so there is no signature to check. That is normal for an app that was updated or removed while it was running — quitting and reopening it clears this. It is also how a program hides its own file, so one you do not recognise deserves a closer look."
         case .unreadable:
             "DragonWatch cannot read this file, so nothing about it can be checked — and unlike a system daemon, it is not somewhere macOS manages."
         }

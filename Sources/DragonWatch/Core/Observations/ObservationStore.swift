@@ -57,16 +57,14 @@ actor ObservationStore {
         return sightings
     }
 
-    func recordHash(path: String, sha256: String, now: Date) -> Bool {
-        let changed = ledger.recordHash(
-            path: path, sha256: sha256,
-            stamp: ObservationLedger.FileStamp(path: path), now: now)
-        if changed {
+    func recordHash(
+        path: String, sha256: String, stamp: ObservationLedger.FileStamp?, now: Date
+    ) {
+        if ledger.recordHash(path: path, sha256: sha256, stamp: stamp, now: now) {
             persist(now: now)
         } else {
             lightDirty = true
         }
-        return changed
     }
 
     func recordHashAttemptFailed(path: String, now: Date) {

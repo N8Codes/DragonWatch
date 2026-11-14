@@ -15,9 +15,12 @@ struct ProcessRecord: Identifiable, Hashable, Sendable {
     /// claim, not an unknown.
     var parentPID: pid_t?
     var startedAt: Date?
+    /// The file this process was started from is gone, so `path` is where it
+    /// *was*, marked as deleted — never a file to inspect: after an app
+    /// update a different binary sits at the old path.
+    var executableMissing = false
 
     var id: pid_t { pid }
-    var hasMetrics: Bool { cpuPercent != nil }
 }
 
 /// Enumerates all visible processes via libproc, computing CPU% from the delta
@@ -54,10 +57,19 @@ actor ProcessSampler {
 
         for pid in pids.prefix(Int(filled)) where pid > 0 {
             var pathBuffer = [CChar](repeating: 0, count: 4096)
-            guard proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count)) > 0 else {
+            let path: String
+            var executableMissing = false
+            if proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count)) > 0 {
+                path = String(cString: pathBuffer)
+            } else if errno == ENOENT, let stand = Self.deletedExecutablePath(pid: pid) {
+                // The kernel answers ENOENT for a live process whose file was
+                // unlinked. Skipping it made a program invisible the moment it
+                // deleted itself — the oldest way to hide there is.
+                path = stand
+                executableMissing = true
+            } else {
                 continue  // died mid-sample, or not visible to us
             }
-            let path = String(cString: pathBuffer)
 
             // rusage is denied for processes we do not own — about 40% of a
             // running Mac, every root daemon among them. Losing the *metrics*
@@ -95,11 +107,14 @@ actor ProcessSampler {
                 ProcessRecord(
                     pid: pid,
                     path: path,
-                    name: (path as NSString).lastPathComponent,
+                    // Shown as one line everywhere: a newline would hide the
+                    // rest of the name, a direction override would reverse it.
+                    name: UniversalChecks.lineSafe((path as NSString).lastPathComponent),
                     cpuPercent: cpuPercent,
                     residentBytes: residentBytes,
                     parentPID: haveParent ? parentPID : nil,
-                    startedAt: haveParent ? Date(timeIntervalSince1970: startEpoch) : nil
+                    startedAt: haveParent ? Date(timeIntervalSince1970: startEpoch) : nil,
+                    executableMissing: executableMissing
                 ))
         }
 
@@ -118,6 +133,34 @@ actor ProcessSampler {
         guard wallDeltaNs > 0, let previous = previousCPUTimeNs, cpuTimeNs >= previous
         else { return 0 }
         return Double(cpuTimeNs - previous) / Double(wallDeltaNs) * 100.0
+    }
+
+    /// Appended to the last known path of a process whose executable is gone,
+    /// the way Linux reports one in `/proc/<pid>/exe`. It also keeps the
+    /// ledgers from confusing the vanished file with whatever replaces it at
+    /// the same path.
+    static let deletedMarker = " (deleted)"
+
+    /// A stand-in path for a live process with no executable on disk: where
+    /// it was started from when the kernel still says (our own processes),
+    /// else its short command name. nil for a pid that is gone or a zombie.
+    nonisolated static func deletedExecutablePath(pid: pid_t) -> String? {
+        var comm = [CChar](repeating: 0, count: Int(MAXCOMLEN) + 1)
+        guard dw_proc_live_name(pid, &comm) == 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: 4096)
+        let executed =
+            dw_proc_exec_path(pid, &buffer, buffer.count) == 0 ? String(cString: buffer) : nil
+        return deletedExecutablePath(executedAs: executed, commandName: String(cString: comm))
+    }
+
+    /// A relative `executedAs` cannot be resolved after the fact, so only an
+    /// absolute one is kept as the location.
+    nonisolated static func deletedExecutablePath(
+        executedAs: String?, commandName: String
+    ) -> String? {
+        if let executedAs, executedAs.hasPrefix("/") { return executedAs + deletedMarker }
+        let name = executedAs.map { ($0 as NSString).lastPathComponent } ?? commandName
+        return name.isEmpty ? nil : name + deletedMarker
     }
 
     /// Executable path of a process that may not be in the current sample —

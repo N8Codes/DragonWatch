@@ -14,11 +14,25 @@ struct ContentView: View {
     @AppStorage("hasOnboarded") private var hasOnboarded = false
     @AppStorage("list.sort") private var sortRaw = ProcessListSort.riskFirst.rawValue
     @State private var tab: PanelTab = .processes
-    @State private var selection: MonitoredProcess?
+    @State private var selected: MonitoredProcess?
     @State private var inspectedGroupID: String?
     @State private var expandedGroups: Set<String> = []
     @State private var searchText = ""
     @Environment(\.openWindow) private var openWindow
+
+    /// The selected process as the latest sample has it, so the detail panel
+    /// follows a re-rating; the click-time copy stands in once it has exited.
+    private var selection: MonitoredProcess? {
+        guard let selected else { return nil }
+        return model.groups.lazy.flatMap(\.members)
+            .first { $0.id == selected.id && $0.record.path == selected.record.path }
+            ?? selected
+    }
+
+    /// The Review tab lists both, so it stays reachable while either has rows.
+    private var hasReviewItems: Bool {
+        !model.watcher.pendingReview.isEmpty || !model.watcher.markedUnexpected.isEmpty
+    }
 
     private var sort: ProcessListSort {
         ProcessListSort(rawValue: sortRaw) ?? .riskFirst
@@ -35,11 +49,10 @@ struct ContentView: View {
         .frame(width: AppText.popoverWidth, height: AppText.popoverHeight)
         .onAppear { model.popoverDidOpen() }
         .onDisappear { model.popoverDidClose() }
-        .onChange(of: model.pendingReview.isEmpty) { _, empty in
-            // The Review tab disappears once the queue is empty, so anyone
-            // standing on it when they answer the last item would be left
-            // looking at a tab that no longer has a button.
-            if empty, tab == .review { tab = .processes }
+        .onChange(of: hasReviewItems) { _, has in
+            // The Review tab disappears once it has nothing to list, so anyone
+            // standing on it would be left on a tab that no longer has a button.
+            if !has, tab == .review { tab = .processes }
         }
     }
 
@@ -55,20 +68,25 @@ struct ContentView: View {
                     processList
                 } else {
                     Spacer()
-                    ProgressView("Assessing running processes…")
-                        .controlSize(.small)
+                    ProgressView(
+                        model.launchProgress.map {
+                            "Checking signatures… \($0.done) of \($0.total)"
+                        } ?? "Assessing running processes…"
+                    )
+                    .controlSize(.small)
                     Spacer()
                 }
                 if let selection {
                     Divider()
-                    ProcessDetailView(process: selection) { self.selection = nil }
+                    ProcessDetailView(process: selection) { selected = nil }
+                        .id(selection.id)
                 } else if let inspectedGroupID,
                     let group = model.groups.first(where: { $0.id == inspectedGroupID })
                 {
                     Divider()
                     GroupDetailView(
                         group: group, allProcesses: model.groups.flatMap(\.members),
-                        select: { selection = $0 },
+                        select: { selected = $0 },
                         dismiss: { self.inspectedGroupID = nil })
                 }
             case .tree:
@@ -78,10 +96,11 @@ struct ContentView: View {
                 ProcessTreeView(
                     nodes: ProcessTree.build(model.groups.flatMap(\.members)),
                     allProcesses: model.groups.flatMap(\.members),
-                    select: { selection = $0 })
+                    select: { selected = $0 })
                 if let selection {
                     Divider()
-                    ProcessDetailView(process: selection) { self.selection = nil }
+                    ProcessDetailView(process: selection) { selected = nil }
+                        .id(selection.id)
                 }
             case .alerts:
                 AlertHistoryView(alerts: model.alerts)
@@ -157,10 +176,10 @@ struct ContentView: View {
                         },
                         select: {
                             inspectedGroupID = nil
-                            selection = $0
+                            selected = $0
                         },
                         inspect: {
-                            selection = nil
+                            selected = nil
                             inspectedGroupID = $0.id
                         }
                     )
@@ -191,19 +210,23 @@ struct ContentView: View {
                         .accessibilityHidden(true)  // the label carries the count
                 }
             }
-            if !model.pendingReview.isEmpty {
-                // Only present when a verdict is actually waiting: permanent
+            if hasReviewItems {
+                // Only present when there is something to review: permanent
                 // chrome for an empty queue is the clutter the banner was.
                 tabButton(
                     .review, systemImage: "questionmark.diamond.fill",
-                    help: "Review — \(model.pendingReview.count) awaiting a verdict"
+                    help: model.watcher.pendingReview.isEmpty
+                        ? "Review — \(model.watcher.markedUnexpected.count) marked not expected"
+                        : "Review — \(model.watcher.pendingReview.count) awaiting a verdict"
                 )
                 .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 7, height: 7)
-                        .offset(x: 3, y: -3)
-                        .accessibilityHidden(true)  // the label carries the count
+                    if !model.watcher.pendingReview.isEmpty {
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 3, y: -3)
+                            .accessibilityHidden(true)  // the label carries the count
+                    }
                 }
             }
             tabButton(
@@ -291,5 +314,6 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .help(help)
         .accessibilityLabel(help)
+        .accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 }

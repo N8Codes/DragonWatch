@@ -22,8 +22,38 @@ struct DocumentInspector: FormatInspector {
 
     // MARK: - PDF
 
+    /// Whether the `%%EOF` at `offset` is preceded by `startxref`, a byte
+    /// offset, and nothing else but whitespace.
+    static func closesTrailer(_ probe: FileProbe, markerAt offset: Int64) -> Bool {
+        let window: Data
+        let local: Int
+        if offset >= probe.tailOffset, probe.tailOffset > 0 || offset < Int64(probe.tail.count) {
+            window = probe.tail
+            local = Int(offset - probe.tailOffset)
+        } else {
+            window = probe.head
+            local = Int(offset)
+        }
+        guard local >= 0, local <= window.count else { return false }
+        let base = window.startIndex
+        let before = window[(base + max(0, local - 48))..<(base + local)]
+        guard let keyword = before.range(of: Data("startxref".utf8), options: .backwards) else {
+            return false
+        }
+        let rest = before[keyword.upperBound...]
+        let isSpace: (UInt8) -> Bool = { $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }
+        return rest.contains(where: { $0 >= 0x30 && $0 <= 0x39 })
+            && rest.allSatisfy { isSpace($0) || ($0 >= 0x30 && $0 <= 0x39) }
+    }
+
     /// A PDF ends with `%%EOF`. Incremental updates append whole revisions,
-    /// each with its own marker, so the *last* one is the end of the document.
+    /// each with its own marker, so the *last* one is the end of the document
+    /// — but only a marker that closes a `startxref` trailer counts. The
+    /// bare six characters after appended data are not the end of anything.
+    ///
+    /// A forged trailer pointing back at the real cross-reference table is a
+    /// well-formed incremental update that happens to hold junk; telling
+    /// that apart takes a full parse, so it is disclosed as a revision.
     func pdf(_ probe: FileProbe) -> InspectorOutput {
         var output = InspectorOutput()
         output.checks.append("PDF end marker and revisions")
@@ -33,7 +63,11 @@ struct DocumentInspector: FormatInspector {
                 ? "PDF active content (whole file)"
                 : "PDF active content (first and last 64 KB)")
 
-        let markers = probe.offsets(of: Array("%%EOF".utf8))
+        let found = probe.offsets(of: Array("%%EOF".utf8))
+        let closing = found.filter { Self.closesTrailer(probe, markerAt: $0) }
+        // A file with markers but no well-formed trailer in view is judged
+        // by its last marker, as before.
+        let markers = closing.isEmpty ? found : closing
         if let last = markers.last {
             // Writers commonly leave a newline after the marker.
             let extent = ContainerExtent(
@@ -65,8 +99,8 @@ struct DocumentInspector: FormatInspector {
         // Only tokens long enough to mean something are searched. `/AA` and
         // `/JS` were tried and removed: three characters match by accident
         // constantly — `/AA` was flagging every document whose font subset
-        // was named `/AAAAAA+Montserrat`, and 26 of 60 real PDFs tripped this
-        // rule, including resumes and tax returns.
+        // was named `/AAAAAA+ExampleSans`, and 26 of 60 ordinary PDFs tripped
+        // this rule.
         output.findings.append(contentsOf: activeContent(probe))
         return output
     }
@@ -153,7 +187,7 @@ struct DocumentInspector: FormatInspector {
     func zipContainer(_ probe: FileProbe) -> InspectorOutput {
         let parsed = ArchiveInspector.readDirectory(probe: probe)
         var output = ArchiveInspector.inspect(probe: probe, directory: parsed)
-        output.checks.append("Document type, macros and external references")
+        output.checks.append("Document type and macros")
         guard let directory = parsed else { return output }
         let names = directory.entries.map { $0.name.lowercased() }
 

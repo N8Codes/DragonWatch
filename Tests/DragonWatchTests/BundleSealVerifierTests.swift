@@ -56,7 +56,7 @@ final class BundleSealVerifierTests: XCTestCase {
 
         var assessment = await engine.assess(path: binary.path)
         XCTAssertEqual(
-            assessment.vouchedByBundle, "/Fixture.app",
+            assessment.vouchedByBundle, fixtureBundle,
             "a file matching its recorded fingerprint keeps its vouch")
 
         try "replaced".data(using: .utf8)!.write(to: binary)
@@ -123,7 +123,32 @@ final class BundleSealVerifierTests: XCTestCase {
 
     private func vouch(for binary: URL) throws -> [String: (bundle: String, fingerprint: Data)] {
         let fingerprint = try XCTUnwrap(CodeIdentity.fingerprint(path: binary.path))
-        return [binary.path: ("/Fixture.app", fingerprint)]
+        return [binary.path: (fixtureBundle, fingerprint)]
+    }
+
+    private var fixtureBundle: String {
+        directory.appendingPathComponent("Fixture.app").path
+    }
+
+    /// The detail panel once offered one process's bundle for another
+    /// process, and nothing below it checked that the binary was inside.
+    func testBinaryOutsideTheBundleIsNeverVouched() async throws {
+        let calculator = "/System/Applications/Calculator.app"
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: calculator), "no Calculator.app")
+        let outsider = try makeFixtureBinary(contents: "outsider")
+
+        let verifier = BundleSealVerifier(cacheDirectory: directory)
+        let verified = await verifier.verify(bundlePath: calculator, vouching: [outsider.path])
+        XCTAssertTrue(verified, "the bundle itself is genuine")
+        let vouches = await verifier.vouches()
+        XCTAssertNil(vouches[outsider.path])
+
+        // A vouch record naming the wrong bundle is not honoured either.
+        let engine = TrustEngine()
+        let fingerprint = try XCTUnwrap(CodeIdentity.fingerprint(path: outsider.path))
+        await engine.setVouchedBinaries([outsider.path: (calculator, fingerprint)])
+        let assessment = await engine.assess(path: outsider.path)
+        XCTAssertNil(assessment.vouchedByBundle)
     }
 
     func testFakeBundleFailsVerification() async throws {

@@ -19,7 +19,6 @@ enum AppText {
     static var caption2: Font { sized(11) }
     /// Secondary detail under a row, and rule rationales.
     static var caption: Font { sized(12) }
-    static var footnote: Font { sized(12) }
     /// List rows and body copy in dense panels.
     static var callout: Font { sized(13) }
     static var body: Font { sized(14) }
@@ -33,7 +32,7 @@ enum AppText {
 
     /// Icons that sit beside text and must grow with it.
     static func icon(_ points: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: (points * scale).rounded(), weight: weight)
+        sized(points, weight)
     }
 
     /// The popover widens with the scale rather than squeezing the same

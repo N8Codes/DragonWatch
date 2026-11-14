@@ -37,7 +37,7 @@ enum AlertKind: String, CaseIterable, Sendable {
         switch self {
         case .newUntrustedProcess: "New non-trusted process"
         case .invalidSignature: "Invalid signature"
-        case .newPersistenceItem: "New persistence item"
+        case .newPersistenceItem: "New or changed persistence item"
         case .binaryReplaced: "Binary replaced in place"
         case .sustainedCPU: "Sustained CPU spike"
         }

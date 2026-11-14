@@ -50,6 +50,11 @@ Every process's executable is checked against the Security framework:
 Signatures anchor the rating; context refines it. A notarized driver running
 from a hidden folder stays trusted — an unsigned binary in `/tmp` does not.
 
+A process whose executable is **no longer on disk** is listed as
+`name (deleted)` and rated Caution: there is nothing left to check. That is
+routine after an app is updated or removed while running, and it is also how
+a program hides its own file.
+
 **Every rating explains itself.** Click any process and the detail view walks
 through the reasoning in the order the engine applied it — including signals
 that were considered and deliberately *not* counted, so nothing is silent.
@@ -83,7 +88,7 @@ Binaries whose filename says nothing on its own are grouped and named by
 the folder they came from — a bare `2.1.222` shows as `toolkit · 2.1.222`,
 and several sessions of one tool running different versions are one row with
 the versions inside it. Known AI agent CLIs (Claude Code, Codex, Gemini CLI,
-Aider, Copilot CLI) get their product name, and the matching desktop app's
+Aider, Copilot CLI) get their product name when strongly signed, and the matching desktop app's
 icon when it is installed — otherwise a terminal-with-spark glyph. Nothing
 third-party is bundled.
 
@@ -106,9 +111,11 @@ What it checks:
 - **Contents against the extension.** A Mach-O named `.png` is the headline
   case. An image under another image's name is only Caution: common on the
   web, nothing in it can run, and the name is still wrong.
-- **Data past the end of the file.** Most formats declare their own length, so
-  this is an exact byte count, not a guess — it is how a second file rides
-  inside an innocuous-looking one.
+- **Data past the end of the file.** JPEG, PNG and MP4-family files are
+  followed through their own segments, chunks and boxes to the end a decoder
+  would stop at, so a payload with a forged end marker after it is still
+  counted — it is how a second file rides inside an innocuous-looking one.
+  Camera trailers (Samsung, multi-picture) are named rather than flagged.
 - **Deceptive filenames.** Unicode direction overrides that make
   `report‮fdp.exe` display as `reportexe.pdf`, zero-width characters, and
   runnable extensions hiding behind a document one.
@@ -130,9 +137,10 @@ Three rules it never breaks, each enforced by tests:
    over bounded reads instead.
 3. No archive is ever **extracted**.
 
-Structural checks on a large file are sampled: the first and last 64 KB, plus
-whatever the format's own structure declares. Hashing is the exception — a file
-is streamed end to end for its SHA-256, up to a 2 GB ceiling. Reports export as Markdown,
+Most structural checks on a large file are sampled: the first and last 64 KB,
+plus whatever the format's own structure declares. Two things read further, up
+to a 2 GB ceiling: the SHA-256, streamed end to end, and the walk that finds
+where a JPEG, PNG or MP4-family file really ends. Reports export as Markdown,
 JSON, PDF or plain text, written owner-only wherever you save them.
 
 Every rule, with its rationale and what it cannot tell you, is listed in the
@@ -150,20 +158,24 @@ disk on a routine tick.
 ## Background watcher
 
 Watches while the popover is closed and notifies you when something changes: a
-new non-trusted process, a new LaunchAgent/LaunchDaemon, an invalid signature,
-a binary replaced in place, a sustained CPU spike.
+new non-trusted process, a new or rewritten LaunchAgent/LaunchDaemon, an
+invalid signature, a binary replaced in place, a sustained CPU spike.
 
 - **Baseline ledger** decides what counts as "new". On first run anything not
-  clearly trusted is shown for your verdict — asked once, remembered forever.
+  clearly trusted is shown for your verdict — asked once, and your answer is
+  kept for good. Entries you never answered, and programs that stop running,
+  are forgotten after the history period set in Settings.
   Three answers: **Expected** (accepted as normal), **Not expected** (stays
   listed as one you flagged), or **Ignore** (hidden for good, no verdict —
   it won't alert again, but nothing vouches for it).
 - **Alerts carry provenance.** A new-process alert names the parent that
-  started it ("Launched by zsh (pid 7083) — /bin/zsh"), says when that parent
+  started it ("Launched by zsh (pid 4242) — /bin/zsh"), says when that parent
   sits inside an AI agent session (Claude Code, Codex, Gemini CLI, Aider,
-  Copilot CLI — "an AI agent, not you, started it"), and, inside a Homebrew
-  keg, the install receipt ("Homebrew receipt: node 25.9.0_3, poured from
-  bottle, installed 2 May 2026"). Context only — no rating ever rises because
+  Copilot CLI — "an AI agent, not you, started it", said only when that
+  binary's signature identifies it; a look-alike name is called unconfirmed),
+  and, inside a Homebrew
+  keg, the install receipt ("Homebrew receipt: node 20.0.0_1, poured from
+  bottle, installed 1 Jan 2026"). Context only — no rating ever rises because
   of it.
 - **Observation history** records when each binary first appeared, its hash,
   and any signature change. Binaries are hashed a few per tick and re-hashed

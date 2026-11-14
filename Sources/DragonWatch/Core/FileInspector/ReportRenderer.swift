@@ -92,7 +92,7 @@ enum ReportRenderer {
         var lines: [String] = []
         lines.append("# DragonWatch file inspection")
         lines.append("")
-        lines.append("> \(report.disclaimerLine)")
+        lines.append("> \(InspectionReport.disclaimer)")
         lines.append("")
         lines.append("- **Run:** \(ISO8601DateFormatter.readable.string(from: report.generated))")
         lines.append("- **Verdict:** \(report.worstVerdict.label) — \(report.worstVerdict.summary)")
@@ -209,7 +209,7 @@ enum ReportRenderer {
         var lines: [String] = []
         lines.append("DRAGONWATCH FILE INSPECTION")
         lines.append(String(repeating: "=", count: 60))
-        lines.append(report.disclaimerLine)
+        lines.append(InspectionReport.disclaimer)
         lines.append("")
         lines.append("Run:         \(ISO8601DateFormatter.readable.string(from: report.generated))")
         lines.append("Verdict:     \(report.worstVerdict.label)")
@@ -265,7 +265,12 @@ enum ReportRenderer {
     /// Paginated with CoreText into a `CGPDFContext`. No new dependency: the
     /// plain-text rendering is laid out into US Letter pages, which keeps the
     /// PDF and the text export saying exactly the same thing.
-    static func pdf(_ report: InspectionReport) -> Data? {
+    static let maxPDFPages = 500
+    static let pdfTruncationNotice =
+        "REPORT TRUNCATED\n\nThis PDF stops at its page limit and does not list every "
+        + "item inspected.\nExport as Markdown, JSON or plain text for the complete report."
+
+    static func pdf(_ report: InspectionReport, maxPages: Int = maxPDFPages) -> Data? {
         let page = CGRect(x: 0, y: 0, width: 612, height: 792)  // US Letter, 72 dpi
         let margin: CGFloat = 48
         let textBox = page.insetBy(dx: margin, dy: margin)
@@ -293,7 +298,7 @@ enum ReportRenderer {
 
         // A frame that consumes no characters would loop forever; the page cap
         // is the second guard in case a glyph will not fit the column at all.
-        while start < total, pages < 500 {
+        while start < total, pages < maxPages {
             context.beginPDFPage(nil)
             let frame = CTFramesetterCreateFrame(
                 framesetter, CFRange(location: start, length: 0), path, nil)
@@ -303,6 +308,23 @@ enum ReportRenderer {
             pages += 1
             guard consumed > 0 else { break }
             start += consumed
+        }
+        // A report cut short must say so on its last page: a PDF that simply
+        // stops reads as the whole run.
+        if start < total {
+            let notice = NSAttributedString(
+                string: pdfTruncationNotice,
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                    .foregroundColor: NSColor.black,
+                ])
+            context.beginPDFPage(nil)
+            CTFrameDraw(
+                CTFramesetterCreateFrame(
+                    CTFramesetterCreateWithAttributedString(notice),
+                    CFRange(location: 0, length: 0), path, nil),
+                context)
+            context.endPDFPage()
         }
         context.closePDF()
         return data as Data
@@ -344,14 +366,6 @@ enum ReportRenderer {
         }
         if !current.isEmpty { lines.append(current) }
         return lines
-    }
-}
-
-extension InspectionReport {
-    /// The disclaimer as one line, for renderings where a paragraph break
-    /// would separate it from the results it qualifies.
-    var disclaimerLine: String {
-        Self.disclaimer.replacingOccurrences(of: "\n", with: " ")
     }
 }
 

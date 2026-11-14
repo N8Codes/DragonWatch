@@ -11,21 +11,29 @@ import Security
 /// vouch is supposed to provide.
 ///
 /// This binds to the bytes instead. The code directory hash is preferred: it
-/// is what the kernel and `codesign` themselves compare, it covers the code
-/// pages, and the Security framework has it in memory already, so reading it
-/// costs no file I/O. Unsigned files have no cdhash and fall back to SHA-256
-/// of the whole file.
+/// is what the kernel and `codesign` themselves compare. Unsigned files have
+/// no cdhash and fall back to SHA-256 of the whole file.
 enum CodeIdentity {
     /// nil when the file cannot be read at all — an unreadable file is never
     /// treated as matching anything.
+    ///
+    /// The cdhash is read from the signature blob, so on its own it says
+    /// nothing about the code pages: a binary patched in place keeps its
+    /// cdhash. It counts as the fingerprint only while the signature still
+    /// validates against the executable; otherwise the file's own SHA-256
+    /// does, which no recorded cdhash can equal.
     static func fingerprint(path: String) -> Data? {
-        if let cdhash = codeDirectoryHash(path: path) { return cdhash }
+        if let cdhash = codeDirectoryHash(path: path, requiringValidSignature: true) {
+            return cdhash
+        }
         return FileHasher.sha256Data(path: path)
     }
 
     /// `kSecCodeInfoUnique` — the cdhash. Present for signed and ad-hoc-signed
     /// code, absent for unsigned files.
-    static func codeDirectoryHash(path: String) -> Data? {
+    static func codeDirectoryHash(
+        path: String, requiringValidSignature: Bool = false
+    ) -> Data? {
         var codeOpt: SecStaticCode?
         guard
             SecStaticCodeCreateWithPath(
@@ -33,6 +41,12 @@ enum CodeIdentity {
                 == errSecSuccess,
             let code = codeOpt
         else { return nil }
+        if requiringValidSignature,
+            SecStaticCodeCheckValidity(code, SignatureInspector.validateExecutableOnly, nil)
+                != errSecSuccess
+        {
+            return nil
+        }
 
         var infoOpt: CFDictionary?
         guard

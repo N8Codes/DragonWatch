@@ -146,9 +146,13 @@ actor InspectionEngine {
         inspectors: [FormatInspector],
         hashFiles: Bool
     ) async -> FileInspection {
-        let probe = FileProbe.read(path: path)
+        var probe = FileProbe.read(path: path)
         let format =
             probe.isReadable ? MagicBytes.identify(head: probe.head, tail: probe.tail) : nil
+        // The JPEG walk streams scan data, so it shares the hashing ceiling.
+        if let format, probe.isReadable, probe.size <= limits.maxHashBytes {
+            probe.structure = StructureWalker.scan(path: path, format: format)
+        }
 
         // Ask the format's own inspector which embedded signatures its
         // structure accounts for *before* the generic scan runs, so the scan

@@ -33,20 +33,24 @@ struct VitalsHeaderView: View {
             tile(
                 icon: "internaldrive",
                 caption: "Storage",
-                value: ByteCountFormatter.string(
-                    fromByteCount: vitals.storageFreeBytes, countStyle: .file)
-                    + " free of "
-                    + ByteCountFormatter.string(
-                        fromByteCount: vitals.storageTotalBytes, countStyle: .file),
+                value: vitals.storageTotalBytes == 0
+                    ? "—"
+                    : ByteCountFormatter.string(
+                        fromByteCount: vitals.storageFreeBytes, countStyle: .file)
+                        + " free of "
+                        + ByteCountFormatter.string(
+                            fromByteCount: vitals.storageTotalBytes, countStyle: .file),
                 explanation:
                     "Boot volume: free space (counting purgeable, like Finder) of total capacity."
             )
             tile(
                 icon: vitals.networkUp ? "wifi" : "wifi.slash",
                 caption: "Network",
+                // Probing stops while offline, so the last reading would be stale.
                 value: vitals.networkSummary
-                    + (vitals.latencyMs.map { String(format: " · %.0f ms", $0) } ?? ""),
-                sparkline: vitals.latencySparkline,
+                    + (vitals.networkUp
+                        ? (vitals.latencyMs.map { String(format: " · %.0f ms", $0) } ?? "") : ""),
+                sparkline: vitals.networkUp ? vitals.latencySparkline : [],
                 explanation:
                     "Connection type, and round-trip latency to Apple's captive-portal server (probed every minute)."
             )
@@ -63,7 +67,7 @@ struct VitalsHeaderView: View {
                     ? "Displays (\(vitals.displays.count))" : "Display",
                 value: vitals.displays.first ?? "—",
                 explanation:
-                    "Pixel resolution and current refresh rate. macOS has no global FPS — refresh rate is the honest stat."
+                    "Pixel resolution and maximum refresh rate. macOS has no global FPS — refresh rate is the honest stat."
             )
         }
         .padding(.horizontal, 16)

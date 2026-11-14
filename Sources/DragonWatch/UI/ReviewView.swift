@@ -8,44 +8,30 @@ struct ReviewView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Group {
-            if model.pendingReview.isEmpty && model.markedUnexpected.isEmpty {
-                VStack(spacing: 6) {
-                    Image(systemName: "checkmark.seal")
-                        .font(AppText.title2)
-                        .foregroundStyle(.tertiary)
-                    Text("Nothing awaiting review.")
-                        .font(AppText.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if !model.pendingReview.isEmpty {
-                            Text(
-                                "Are these expected on this Mac? \"Expected\" accepts it as normal and stops the question. \"Not expected\" keeps it listed below as one you have flagged. The eye-slash ignores it: hidden for good, no verdict either way."
-                            )
-                            .font(AppText.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            ForEach(model.pendingReview) { item in
-                                row(item, answered: false)
-                            }
-                        }
-
-                        if !model.markedUnexpected.isEmpty {
-                            Divider()
-                            Text("You marked these as not expected")
-                                .font(AppText.callout.weight(.medium))
-                            ForEach(model.markedUnexpected) { item in
-                                row(item, answered: true)
-                            }
-                        }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                if !model.watcher.pendingReview.isEmpty {
+                    Text(
+                        "Are these expected on this Mac? \"Expected\" accepts it as normal and stops the question. \"Not expected\" keeps it listed below as one you have flagged. The eye-slash ignores it: hidden for good, no verdict either way."
+                    )
+                    .font(AppText.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    ForEach(model.watcher.pendingReview) { item in
+                        row(item, answered: false)
                     }
-                    .padding(10)
+                }
+
+                if !model.watcher.markedUnexpected.isEmpty {
+                    Divider()
+                    Text("You marked these as not expected")
+                        .font(AppText.callout.weight(.medium))
+                    ForEach(model.watcher.markedUnexpected) { item in
+                        row(item, answered: true)
+                    }
                 }
             }
+            .padding(10)
         }
     }
 
@@ -66,13 +52,13 @@ struct ReviewView: View {
                 // apart.
                 if !answered {
                     Button("Expected") {
-                        model.resolveReview(path: item.path, asExpected: true)
+                        model.watcher.resolveReview(path: item.path, asExpected: true)
                     }
                     .controlSize(.regular)
                     .accessibilityLabel("Mark \(item.name) as expected")
                 }
                 Button(answered ? "Actually expected" : "Not expected") {
-                    model.resolveReview(path: item.path, asExpected: answered)
+                    model.watcher.resolveReview(path: item.path, asExpected: answered)
                 }
                 .controlSize(.regular)
                 .accessibilityLabel(
@@ -82,7 +68,7 @@ struct ReviewView: View {
                 // The third answer: "stop asking". Hides the row for good
                 // without vouching for the binary.
                 Button {
-                    model.ignoreReview(path: item.path)
+                    model.watcher.ignoreReview(path: item.path)
                 } label: {
                     Image(systemName: "eye.slash")
                 }
@@ -92,7 +78,7 @@ struct ReviewView: View {
                 )
                 .accessibilityLabel("Ignore \(item.name)")
             }
-            Text(item.path)
+            Text(UniversalChecks.lineSafe(item.path))
                 .font(AppText.monoCaption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -114,13 +100,10 @@ struct ReviewView: View {
                     .help(
                         launch.ancestryDescription ?? launch.parentPath ?? "parent already exited")
                 if let agent = launch.agentSession {
-                    Label(
-                        "Started inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you",
-                        systemImage: "sparkles"
-                    )
-                    .font(AppText.caption)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Label(agent.note, systemImage: agent.verified ? "sparkles" : "questionmark")
+                        .font(AppText.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let keg = item.keg {

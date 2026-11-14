@@ -32,13 +32,13 @@ enum ContainerStructure {
     /// A box that does not advance the cursor terminates the walk.
     static let maxTopLevelBoxes = 64
 
-    static func isoBoxes(head: Data, fileSize: Int64, maxBoxes: Int = maxTopLevelBoxes)
+    static func isoBoxes(head: Data, fileSize: Int64)
         -> (boxes: [Box], reachedEnd: Bool)
     {
         var boxes: [Box] = []
         var cursor: Int64 = 0
 
-        while boxes.count < maxBoxes {
+        while boxes.count < maxTopLevelBoxes {
             guard cursor >= 0, cursor <= Int64(Int.max),
                 let declared = ByteReader.uint32BE(head, at: Int(cursor)),
                 let type = ByteReader.fourCC(head, at: Int(cursor) + 4)
@@ -68,6 +68,14 @@ enum ContainerStructure {
             if cursor == fileSize { return (boxes, true) }
         }
         return (boxes, false)
+    }
+
+    /// The whole-file walk when the probe has one, else the head window.
+    static func isoExtent(probe: FileProbe) -> ContainerExtent? {
+        if let end = probe.structure?.logicalEnd {
+            return ContainerExtent(logicalEnd: end, evidence: "ISO base media box chain")
+        }
+        return isoExtent(head: probe.head, fileSize: probe.size)
     }
 
     static func isoExtent(head: Data, fileSize: Int64) -> ContainerExtent? {

@@ -23,6 +23,12 @@ actor BaselineStore {
             loaded.effectiveSchemaVersion == BaselineLedger.currentSchemaVersion
         {
             ledger = loaded
+            // Entries from before `lastSeen` existed start their clock now,
+            // rather than being judged by how long ago they were first seen.
+            let now = Date()
+            for path in ledger.executables.keys where ledger.executables[path]?.lastSeen == nil {
+                ledger.executables[path]?.lastSeen = now
+            }
             seeding = false
         } else {
             if data != nil {
@@ -39,13 +45,22 @@ actor BaselineStore {
         }
     }
 
+    /// `unseenRetention` is how long an unanswered entry survives without
+    /// running; nil keeps everything.
     func observeBatch(
-        _ items: [(path: String, assessment: TrustAssessment)], now: Date
+        _ items: [(path: String, assessment: TrustAssessment)], now: Date,
+        unseenRetention: TimeInterval? = nil
     ) -> BatchResult {
         var observations: [String: BaselineLedger.Observation] = [:]
         for item in items {
             observations[item.path] = ledger.observe(
                 path: item.path, assessment: item.assessment, now: now)
+        }
+        var housekeeping = ledger.refreshLastSeen(items.map(\.path), now: now)
+        if let unseenRetention, !items.isEmpty,
+            ledger.prune(now: now, unseenFor: unseenRetention) > 0
+        {
+            housekeeping = true
         }
         // An empty batch must not consume the seeding pass. If the very first
         // sample comes back empty — sampling raced the launch, or the process
@@ -54,7 +69,7 @@ actor BaselineStore {
         // program on their Mac at once.
         let wasSeeding = seeding && !items.isEmpty
         if wasSeeding { seeding = false }
-        if observations.values.contains(where: { $0 != .known }) || wasSeeding {
+        if observations.values.contains(where: { $0 != .known }) || wasSeeding || housekeeping {
             persist()
         }
         return BatchResult(observations: observations, wasSeedingPass: wasSeeding)
@@ -66,6 +81,16 @@ actor BaselineStore {
         let fresh = paths.filter { ledger.observePersistenceItem($0) }
         if !fresh.isEmpty { persist() }
         return fresh
+    }
+
+    /// Returns the items whose contents differ from what was last recorded.
+    func observePersistenceContents(_ fingerprints: [String: String]) -> [String] {
+        let recordedBefore = ledger.persistenceFingerprints
+        let changed = fingerprints.keys.sorted().filter {
+            ledger.observePersistenceFingerprint(path: $0, fingerprint: fingerprints[$0]!)
+        }
+        if ledger.persistenceFingerprints != recordedBefore { persist() }
+        return changed
     }
 
     func recordVerdict(path: String, verdict: BaselineLedger.Verdict) {

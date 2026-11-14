@@ -9,12 +9,16 @@ enum SignatureTier: String, CaseIterable, Codable, Sendable {
     case adHoc = "Ad-hoc signed"
     case unsigned = "Unsigned"
     case invalid = "Invalid signature"
-    /// Part of the macOS install, in a location only root can write and
-    /// System Integrity Protection guards, but not readable by us so the
-    /// signature could not actually be checked.
+    /// Managed by macOS (installed or staged by it), in a location only root
+    /// can write and System Integrity Protection guards, but not readable by
+    /// us so the signature could not actually be checked.
     case osManagedUnreadable = "macOS system file (unverified)"
     /// We cannot read the file, and it is not somewhere the OS manages.
     case unreadable = "Cannot be read"
+    /// The process is running but the file it was started from is gone, so
+    /// there is nothing to check. Routine after an app is updated or removed
+    /// while running, and also how a program hides its own file.
+    case executableMissing = "Executable no longer on disk"
 }
 
 /// Context signals that can lower — never raise — a rating.
@@ -99,7 +103,9 @@ enum TrustScoring {
     static func base(for tier: SignatureTier) -> TrustBadge {
         switch tier {
         case .applePlatform, .appStore, .developerID, .osManagedUnreadable: .trusted
-        case .validSigned, .adHoc: .caution
+        // Caution, not suspicious: osquery and Elastic both treat a deleted
+        // executable as a signal that upgrades trip routinely.
+        case .validSigned, .adHoc, .executableMissing: .caution
         case .unsigned, .invalid, .unreadable: .suspicious
         }
     }
@@ -113,7 +119,10 @@ enum TrustScoring {
         // Apple platform binaries are the OS itself; every context signal is
         // noise there. Plenty of stock binaries genuinely carry them —
         // /usr/libexec/dspluginhelperd ships with disable-library-validation.
-        guard tier != .applePlatform, tier != .osManagedUnreadable else { return false }
+        // A missing executable has no location or signature left to read
+        // context from, so nothing is counted against it either.
+        guard tier != .applePlatform, tier != .osManagedUnreadable, tier != .executableMissing
+        else { return false }
         return switch modifier {
         case .suspiciousLocation:
             true
@@ -126,7 +135,7 @@ enum TrustScoring {
             !(tier == .appStore || tier == .developerID)
         case .hiddenPath, .riskyEntitlements:
             // A strongly-identified signer legitimately hides support binaries
-            // (Wacom's .Tablet folder) and legitimately uses JIT/debug
+            // (a tablet driver's dot-folder) and legitimately uses JIT/debug
             // entitlements (every Electron app); for unknown signers the same
             // traits are evasion and injection surface.
             !(tier == .appStore || tier == .developerID)

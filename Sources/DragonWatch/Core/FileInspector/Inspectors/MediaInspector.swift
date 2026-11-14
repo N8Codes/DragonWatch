@@ -17,7 +17,7 @@ struct MediaInspector: FormatInspector {
     func inspect(probe: FileProbe, format: FileFormat) -> InspectorOutput {
         switch format {
         case MagicBytes.wav, MagicBytes.avi: return riff(probe, name: format.name)
-        case MagicBytes.mp4, MagicBytes.mov, MagicBytes.m4a:
+        case MagicBytes.mp4, MagicBytes.mov, MagicBytes.m4a, MagicBytes.isoMedia:
             return isoMedia(probe, format: format)
         case MagicBytes.mp3: return mp3(probe)
         case MagicBytes.flac: return flac(probe)
@@ -45,7 +45,7 @@ struct MediaInspector: FormatInspector {
         output.checks.append("\(format.name) box chain and declared length")
         let walk = ContainerStructure.isoBoxes(head: probe.head, fileSize: probe.size)
 
-        if let extent = ContainerStructure.isoExtent(head: probe.head, fileSize: probe.size) {
+        if let extent = ContainerStructure.isoExtent(probe: probe) {
             let trailing = TrailingData.outcome(probe: probe, extent: extent)
             output.findings.append(contentsOf: trailing.findings)
             output.disclosures.append(contentsOf: trailing.disclosures)
@@ -66,6 +66,7 @@ struct MediaInspector: FormatInspector {
                         + "header there does not parse."))
         }
 
+        C2PAReader.append(to: &output, probe: probe, format: format)
         return output
     }
 

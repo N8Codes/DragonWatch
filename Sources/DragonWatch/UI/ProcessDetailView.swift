@@ -21,15 +21,7 @@ struct ProcessDetailView: View {
                     .font(AppText.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close details")
-                .accessibilityLabel("Close details for \(process.record.name)")
+                CloseDetailsButton(subject: process.record.name, action: dismiss)
             }
 
             if process.trust.isSelf {
@@ -72,12 +64,9 @@ struct ProcessDetailView: View {
                         row("Ancestry", chain)
                     }
                     if let agent = launch.agentSession {
-                        Label(
-                            "Started inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you, launched it",
-                            systemImage: "sparkles"
-                        )
-                        .font(AppText.caption)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Label(agent.note, systemImage: agent.verified ? "sparkles" : "questionmark")
+                            .font(AppText.caption)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if let hash = identity.sha256 {
@@ -110,7 +99,7 @@ struct ProcessDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: process.record.pid) {
             let path = process.record.path
-            identity = await model.observation(for: path)
+            identity = await model.watcher.observation(for: path)
             keg = await Task.detached { HomebrewKeg.locate(path: path) }.value
             currentParent = process.record.parentPID.map { ppid in
                 let name = ProcessSampler.path(forPID: ppid).map {
@@ -118,11 +107,13 @@ struct ProcessDetailView: View {
                 }
                 return "\(name ?? "exited process") (pid \(ppid))"
             }
-            enclosingBundle = await model.strongEnclosingBundle(for: path)
+            enclosingBundle =
+                process.record.executableMissing
+                ? nil : await model.strongEnclosingBundle(for: path)
         }
     }
 
-    /// "zsh (pid 7083) — /bin/zsh, started 28 Aug 2026 at 17:31".
+    /// "zsh (pid 4242) — /bin/zsh, started 1 Jan 2026 at 09:00".
     private func launchDescription(_ launch: LaunchContext) -> String {
         var text = launch.summary
         if let parentPath = launch.parentPath {
@@ -148,7 +139,10 @@ struct ProcessDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
             }
-            ForEach(TrustExplanation.steps(for: process.trust)) { step in
+            // By position: the steps are rebuilt on every refresh, and fresh
+            // identities each time would tear the rows down under VoiceOver.
+            ForEach(Array(TrustExplanation.steps(for: process.trust).enumerated()), id: \.offset) {
+                _, step in
                 Label {
                     Text(step.text)
                         .font(AppText.caption)
@@ -209,12 +203,21 @@ struct ProcessDetailView: View {
                     .foregroundStyle(.secondary)
             }
         case .verified:
-            Label(
-                "Seal verified — contents rate as trusted on the next refresh",
-                systemImage: "checkmark.seal.fill"
-            )
-            .font(AppText.caption)
-            .foregroundStyle(.green)
+            // Only reached while this binary is still not trusted: the seal
+            // held, but the vouch names specific binaries and this is not one.
+            VStack(alignment: .leading, spacing: 2) {
+                Label(
+                    "\(bundleName)'s seal was verified, but not for this binary — it was not running then, or has changed since.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(AppText.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                Button("Verify Again…") {
+                    model.verifySeal(
+                        bundlePath: bundle, vouching: process.record.path)
+                }
+                .controlSize(.regular)
+            }
         case .failed:
             Label(
                 "Seal verification FAILED — \(bundleName)'s contents don't match its signature. Treat with suspicion.",
@@ -231,12 +234,12 @@ struct ProcessDetailView: View {
                 .font(AppText.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .trailing)
-            Text(value)
+            Text(UniversalChecks.lineSafe(value))
                 .font(AppText.monoCaption)
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
-                .help(value)
+                .help(UniversalChecks.lineSafe(value))
         }
     }
 }

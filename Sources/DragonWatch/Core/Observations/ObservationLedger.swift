@@ -251,8 +251,14 @@ struct ObservationLedger: Codable, Sendable {
         return result
     }
 
+    /// Events older than the retention go, and so do the records of binaries
+    /// that have not run for that long — the ledger otherwise keeps every
+    /// path a build tool or test runner ever minted.
     mutating func prune(now: Date, eventRetention: TimeInterval) {
         let cutoff = now.addingTimeInterval(-eventRetention)
+        if identities.values.contains(where: { $0.lastSeen < cutoff }) {
+            identities = identities.filter { $0.value.lastSeen >= cutoff }
+        }
         events.removeAll { $0.date < cutoff }
         if events.count > Self.eventCap {
             events.removeFirst(events.count - Self.eventCap)

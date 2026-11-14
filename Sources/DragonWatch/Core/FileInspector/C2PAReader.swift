@@ -26,21 +26,55 @@ enum C2PAReader {
         return boxes[key]
     }
 
-    static func disclosures(probe: FileProbe, format: FileFormat?) -> [Disclosure] {
-        guard let payload = JUMBF.payload(probe: probe, format: format) else { return [] }
-        let boxes = JUMBF.labelledCBOR(in: payload)
-        guard !boxes.isEmpty else {
-            // A JUMBF container that yields no assertions is either truncated
-            // by the head window or malformed; either way, saying nothing
-            // would be the wrong answer.
-            return [
-                Disclosure(
-                    title: "Content Credentials present but unreadable",
-                    detail:
-                        "The file carries a C2PA container that could not be parsed — it may be "
-                        + "larger than the portion DragonWatch reads, or malformed.")
-            ]
+    /// How far the search for a manifest reached, for the "examined" list.
+    enum Coverage: Equatable {
+        /// This reader does not know where the format keeps one.
+        case notExamined
+        case wholeFile
+        case headWindowOnly
+    }
+
+    /// Adds the manifest's disclosures and names the check by what it
+    /// covered — "none present" is only said when the whole file was walked.
+    static func append(to output: inout InspectorOutput, probe: FileProbe, format: FileFormat?) {
+        let scope = coverage(probe: probe, format: format)
+        guard scope != .notExamined else { return }
+        let found = disclosures(probe: probe, format: format)
+        output.disclosures.append(contentsOf: found)
+        if !found.isEmpty {
+            output.checks.append("Content Credentials")
+        } else {
+            output.checks.append(
+                scope == .wholeFile
+                    ? "Content Credentials (none present)"
+                    : "Content Credentials (none in the first 64 KB)")
         }
+    }
+
+    static func coverage(probe: FileProbe, format: FileFormat?) -> Coverage {
+        guard JUMBF.canCarry(format) else { return .notExamined }
+        return probe.structure == nil ? .headWindowOnly : .wholeFile
+    }
+
+    static func disclosures(probe: FileProbe, format: FileFormat?) -> [Disclosure] {
+        let unreadable = Disclosure(
+            title: "Content Credentials present but unreadable",
+            detail:
+                "The file carries a C2PA container that could not be parsed — it may be "
+                + "larger than the portion DragonWatch reads, or malformed.")
+        let payload: Data
+        switch probe.structure?.credentials {
+        case .found(let data): payload = data
+        case .unreadable: return [unreadable]
+        case .absent: return []
+        case nil:
+            guard let windowed = JUMBF.payload(probe: probe, format: format) else { return [] }
+            payload = windowed
+        }
+        let boxes = JUMBF.labelledCBOR(in: payload)
+        // A container that yields no assertions is truncated or malformed;
+        // saying nothing would be the wrong answer.
+        guard !boxes.isEmpty else { return [unreadable] }
 
         var disclosures: [Disclosure] = []
         let claim = assertion("c2pa.claim", in: boxes).flatMap(CBOR.decode)

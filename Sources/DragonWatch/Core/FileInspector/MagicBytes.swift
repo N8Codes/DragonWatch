@@ -73,6 +73,14 @@ enum MagicBytes {
 
     static let mp4 = FileFormat(name: "MPEG-4", family: .video, extensions: ["mp4", "m4v"])
     static let mov = FileFormat(name: "QuickTime movie", family: .video, extensions: ["mov", "qt"])
+    /// Any `ftyp` brand the table does not single out. There are dozens
+    /// (`mp41`, `iso5`, `M4V `, `3gp4`…), and without this a normal video read
+    /// as "contents could not be confirmed".
+    static let isoMedia = FileFormat(
+        name: "ISO base media", family: .video,
+        extensions: [
+            "mp4", "m4v", "mov", "qt", "m4a", "m4b", "3gp", "3g2", "heic", "heif", "avif",
+        ])
     static let matroska = FileFormat(
         name: "Matroska / WebM", family: .video, extensions: ["mkv", "webm"])
     static let avi = FileFormat(name: "AVI", family: .video, extensions: ["avi"])
@@ -158,6 +166,7 @@ enum MagicBytes {
         .init(mp4, offset: 4, ascii("ftyp"), secondaryOffset: 8, secondaryBytes: ascii("mp42")),
         .init(mov, offset: 4, ascii("ftyp"), secondaryOffset: 8, secondaryBytes: ascii("qt  ")),
         .init(m4a, offset: 4, ascii("ftyp"), secondaryOffset: 8, secondaryBytes: ascii("M4A ")),
+        .init(isoMedia, offset: 4, ascii("ftyp")),
         .init(matroska, [0x1A, 0x45, 0xDF, 0xA3]),
 
         .init(mp3, ascii("ID3")),
@@ -214,10 +223,6 @@ enum MagicBytes {
 
     // MARK: - Identification
 
-    /// Identifies `head` against the table, most specific match first.
-    ///
-    /// Returns `nil` for anything the table does not know — the unclassified
-    /// case, which is reported rather than guessed at.
     /// Identifies a probe: trailer signatures first, then the head.
     static func identify(head: Data, tail: Data) -> FileFormat? {
         for signature in trailerSignatures
@@ -227,6 +232,10 @@ enum MagicBytes {
         return identify(head: head)
     }
 
+    /// Identifies `head` against the table, most specific match first.
+    ///
+    /// Returns `nil` for anything the table does not know — the unclassified
+    /// case, which is reported rather than guessed at.
     static func identify(head: Data) -> FileFormat? {
         if let ambiguous = disambiguateCafebabe(head: head) { return ambiguous }
 
@@ -284,11 +293,11 @@ enum MagicBytes {
         return next <= 16 ? machOFat : javaClass
     }
 
-    /// An SVG is XML, so the XML signature matches first. Look a little
-    /// further for the root element before calling it one.
+    /// An SVG is XML, so the XML signature matches first. Look through the
+    /// window for the root element before calling it one — a long comment or
+    /// doctype can push it well past the first few kilobytes.
     private static func looksLikeSVG(head: Data) -> Bool {
-        guard let text = String(data: head.prefix(4096), encoding: .utf8) else { return false }
-        return text.contains("<svg")
+        head.range(of: Data("<svg".utf8)) != nil
     }
 
     // MARK: - Reverse lookup

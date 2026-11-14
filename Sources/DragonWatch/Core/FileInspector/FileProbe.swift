@@ -5,7 +5,8 @@ import Foundation
 ///
 /// Bounded on purpose — a head and tail window identifies a format and catches
 /// data appended past a container's end, and makes a 40 GB file cost what a
-/// 40 KB one does. Only hashing streams the whole file, and that is opt-in.
+/// 40 KB one does. Only hashing streams the whole file (on by default, up to
+/// the engine's size ceiling).
 struct FileProbe: Sendable {
     /// 64 KiB each end. Large enough for every signature in the table, every
     /// JPEG/PNG header chain, and a ZIP end-of-central-directory record with a
@@ -31,6 +32,9 @@ struct FileProbe: Sendable {
     /// The head was read but the tail was not, so end-of-file checks did not
     /// run. Reported rather than left to look like a clean result.
     let partialRead: Bool
+    /// The structure walk for formats that have one. Set by the engine after
+    /// identification; `nil` means only the two windows are available.
+    var structure: StructureScan? = nil
 
     var declaredExtension: String {
         (path as NSString).pathExtension.lowercased()
@@ -94,10 +98,18 @@ struct FileProbe: Sendable {
             return result(error: "Folder could not be listed: permission denied")
         }
         guard !isDir, !isLink else { return result() }
-
-        guard let handle = FileHandle(forReadingAtPath: path) else {
+        // Opening a named pipe blocks until something writes to it, and no
+        // cancellation reaches a thread parked in `open`; a device can be
+        // endless. O_NOFOLLOW covers a link swapped in since the `lstat`.
+        guard (status.st_mode & S_IFMT) == S_IFREG else {
+            return result(
+                error: "Not a regular file (a pipe, socket or device), so it was not opened")
+        }
+        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else {
             return result(error: "Permission denied or unreadable")
         }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }
 
         // A throw here is not end-of-file. Swallowing it yields an empty
@@ -125,7 +137,8 @@ struct FileProbe: Sendable {
             // A short tail means the end of the file was not obtained, so the
             // end-of-file checks did not really run.
             return result(
-                head: head, tail: tail, tailOffset: tailStart, partial: tail.isEmpty)
+                head: head, tail: tail, tailOffset: tailStart,
+                partial: tail.count < windowSize)
         } catch {
             return result(head: head, tail: Data(), tailOffset: tailStart, partial: true)
         }

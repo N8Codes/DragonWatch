@@ -122,20 +122,20 @@ final class ProcessGrouperTests: XCTestCase {
         let home = NSHomeDirectory()
         let groups = ProcessGrouper.group([
             process(
-                pid: 1, path: home + "/.local/share/claude/versions/2.1.246", cpu: 0,
+                pid: 1, path: home + "/.local/share/claude/versions/1.0.6", cpu: 0,
                 tier: .developerID),
             process(
-                pid: 2, path: home + "/.local/share/claude/versions/2.1.248", cpu: 0,
+                pid: 2, path: home + "/.local/share/claude/versions/1.0.8", cpu: 0,
                 tier: .developerID),
             process(
-                pid: 3, path: home + "/.local/share/claude/versions/2.1.251", cpu: 0,
+                pid: 3, path: home + "/.local/share/claude/versions/1.0.9", cpu: 0,
                 tier: .developerID),
             process(
                 pid: 4, path: home + "/.local/share/toolkit/versions/1.0", cpu: 0,
                 tier: .developerID),
         ])
         let claude = groups.first { $0.name == "Claude Code" }
-        XCTAssertEqual(claude?.members.map(\.record.name), ["2.1.246", "2.1.248", "2.1.251"])
+        XCTAssertEqual(claude?.members.map(\.record.name), ["1.0.6", "1.0.8", "1.0.9"])
         XCTAssertNil(claude?.contextHint, "several versions: the expanded rows say which")
         XCTAssertTrue(ProcessGrouper.isAgentGroup(claude!))
         let toolkit = groups.first { $0.name == "toolkit" }

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Fixed-size FIFO sample buffer — oldest sample evicted on overflow. Backs the
-/// short-term histories (system CPU, latency) that power the sustained-spike
-/// rule. In-memory only; never written to disk.
+/// CPU and latency sparklines; the CPU history also feeds the sustained-spike
+/// rule. In-memory only.
 struct RingBuffer<Element> {
     let capacity: Int
     private var storage: [Element] = []
@@ -13,9 +13,6 @@ struct RingBuffer<Element> {
         self.capacity = capacity
         storage.reserveCapacity(capacity)
     }
-
-    var count: Int { storage.count }
-    var isFull: Bool { storage.count == capacity }
 
     mutating func append(_ element: Element) {
         if storage.count < capacity {

@@ -57,9 +57,10 @@ Two things it has to work around, both learned the hard way:
   validates platform binaries against its trust cache by cdhash, so a copy
   never executes. The downgrade case therefore uses an ad-hoc-signed binary we
   build ourselves, not a copy of `/bin/sleep`.
-- **The ledger records every path permanently and alerts fire once per path**,
-  so each run uses unique paths. A fixed name passes once and silently tests
-  nothing afterwards.
+- **Alerts fire once per path while the ledger remembers it** (iOS Simulator
+  apps: once per build, keyed by cdhash), and an unanswered path is only
+  forgotten after the history period, so each run uses unique paths. A fixed
+  name passes once and silently tests nothing afterwards.
 
 Also measure rather than assume: idle CPU and memory with the popover closed,
 over at least half an hour — a single reading minutes after launch missed a
@@ -95,8 +96,8 @@ A change is not finished until all of these are true:
   goes through it, including the public intel caches: uniform beats a
   per-file judgement call about sensitivity. `AppSupportTests` enforces both
   halves, and no `Data.write`/`createDirectory` should appear outside
-  `AppSupport.swift` — the one exception is the user-driven history export,
-  which writes to a path the user chose and then sets 0600 on it.
+  `AppSupport.swift` — the history and inspection-report exports write to a
+  path the user chose, through `writePrivately` like everything else.
 - **Closed means silent.** With the popover closed and intel off, the app makes
   no network requests at all. Anything recurring that only feeds a view must be
   gated on `popoverOpen` — see `AppModel.shouldProbeLatency`, which is unit
@@ -121,14 +122,22 @@ A change is not finished until all of these are true:
   `kSecCSBasicValidateOnly` (6) — 6 also skips the code pages, so a binary
   patched in place validates clean. Verified by execution; there is a test.
 - **Seal vouches name specific binaries**, identified by their *contents*
-  (cdhash, or SHA-256 when unsigned), never bundle membership and never
-  `mtime`/`size` — both of those are settable by whoever can write the file,
-  so a swapped binary kept its vouch. The fingerprint is re-checked on every
-  assessment, not only when the vouch map is loaded.
+  (cdhash while the signature still validates, SHA-256 otherwise), never
+  bundle membership and never `mtime`/`size` — both of those are settable by
+  whoever can write the file, so a swapped binary kept its vouch. A cdhash
+  alone is not contents either: it lives in the signature blob and survives
+  a patched code page. The fingerprint is re-checked on every assessment,
+  not only when the vouch map is loaded.
 - **Nothing about this Mac is ever sent anywhere.** Intel is on-demand only,
   matches locally, and may download public feeds but never upload — no hash,
   no path, no name. Every provider carries a `privacyDisclosure` and defaults
   to off. A feature that needs to send data to work does not belong here.
+- **A name is not an identity.** An agent's product name, icon and "an agent
+  started it" go only to a strongly signed binary; never key trust or a
+  reassuring label on a file or folder name alone.
+- **The end of a file comes from its structure, not a search.** Use
+  `StructureWalker` for where a container ends; "the last end marker in the
+  window" is forgeable by appending one.
 - **List order is stable** — badge severity then name; never per-sample
   numbers like CPU, which made rows jump mid-read.
 - **Every rating explains itself.** New scoring rules need matching text in
@@ -141,6 +150,10 @@ A change is not finished until all of these are true:
 
 ## Conventions
 
+- `AppModel` runs the sampling loop and holds what the popover shows;
+  `Watcher` owns the ledgers, the review lists and every alert rule;
+  `InspectionModel` owns the Inspect window. Keep new work in the one it
+  belongs to rather than growing `AppModel` back.
 - Sampling and I/O live in actors; UI state is `@MainActor` and `@Observable`.
   Views read models directly and use `@Bindable` only where they need a
   two-way binding. Do not reintroduce `ObservableObject`/`@Published`: nested

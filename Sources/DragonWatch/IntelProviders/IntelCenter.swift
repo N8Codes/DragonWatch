@@ -13,10 +13,11 @@ import Foundation
     private(set) var results: [String: CheckState] = [:]
 
     private let settings: SettingsModel
-    private let kev = KEVProvider()
+    private let kev: KEVProvider
 
-    init(settings: SettingsModel) {
+    init(settings: SettingsModel, cacheDirectory: URL? = nil) {
         self.settings = settings
+        kev = KEVProvider(cacheDirectory: cacheDirectory)
     }
 
     var anyProviderEnabled: Bool {

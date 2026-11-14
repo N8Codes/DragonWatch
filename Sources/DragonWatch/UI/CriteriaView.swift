@@ -9,13 +9,13 @@ struct CriteriaView: View {
             VStack(alignment: .leading, spacing: 14) {
                 intro
 
-                section("Step 1 — the signature sets the starting point") {
+                PanelSection(title: "Step 1 — the signature sets the starting point", spacing: 7) {
                     ForEach(SignatureTier.allCases, id: \.self) { tier in
                         tierRow(tier)
                     }
                 }
 
-                section("Step 2 — context can only lower it") {
+                PanelSection(title: "Step 2 — context can only lower it", spacing: 7) {
                     Text(
                         "Each signal below drops the rating one step. Several stack. None can ever raise a rating."
                     )
@@ -26,7 +26,7 @@ struct CriteriaView: View {
                     }
                 }
 
-                section("Exemptions — and why they exist") {
+                PanelSection(title: "Exemptions — and why they exist", spacing: 7) {
                     exemption(
                         "Apple system binaries ignore every context signal.",
                         "They are the operating system; flagging macOS's own components would bury real findings in noise."
@@ -41,7 +41,7 @@ struct CriteriaView: View {
                     )
                 }
 
-                section("Inspecting a file — what each finding means") {
+                PanelSection(title: "Inspecting a file — what each finding means", spacing: 7) {
                     Text(
                         "Inspecting a file answers one question: are these contents what the file claims to be? It is not a malware scan."
                     )
@@ -60,13 +60,13 @@ struct CriteriaView: View {
                     }
                 }
 
-                section("What inspecting a file cannot tell you") {
+                PanelSection(title: "What inspecting a file cannot tell you", spacing: 7) {
                     ForEach(InspectionRulebook.limits, id: \.self) { limit in
                         bullet(limit)
                     }
                 }
 
-                section("What this app deliberately does not do") {
+                PanelSection(title: "What this app deliberately does not do", spacing: 7) {
                     bullet(
                         "Process ratings come from signatures and context, never from what a program does while running. The file inspector does read contents, but only to answer whether a file matches what it claims to be — never whether it is dangerous. Binaries are hashed a few at a time so a change on disk can be noticed; no hash ever leaves this Mac."
                     )
@@ -201,16 +201,5 @@ struct CriteriaView: View {
         }
         .font(AppText.caption)
         .foregroundStyle(.secondary)
-    }
-
-    private func section(
-        _ title: String, @ViewBuilder content: () -> some View
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(AppText.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            content()
-        }
     }
 }

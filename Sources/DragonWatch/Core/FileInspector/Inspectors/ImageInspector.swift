@@ -18,6 +18,9 @@ struct ImageInspector: FormatInspector {
 
     func inspect(probe: FileProbe, format: FileFormat) -> InspectorOutput {
         var output = InspectorOutput()
+        // Named only for the formats that have a walk: TIFF, BMP and the
+        // rest are identified, and nothing more is claimed for them.
+        var examined = true
         switch format {
         case MagicBytes.jpeg: output = jpeg(probe)
         case MagicBytes.png: output = png(probe)
@@ -25,17 +28,12 @@ struct ImageInspector: FormatInspector {
         case MagicBytes.webp: output = riff(probe, name: "WebP")
         case MagicBytes.heic, MagicBytes.avif: output = isoMedia(probe, name: format.name)
         case MagicBytes.svg: output = svg(probe)
-        default: break
+        default: examined = false
         }
-
-        output.checks.insert("\(format.name) structure and end marker", at: 0)
-
-        // Provenance is read for every image container that can carry it.
-        let provenance = C2PAReader.disclosures(probe: probe, format: format)
-        output.disclosures.append(contentsOf: provenance)
-        output.checks.append(
-            provenance.isEmpty
-                ? "Content Credentials (none present)" : "Content Credentials")
+        if examined {
+            output.checks.insert("\(format.name) structure and end marker", at: 0)
+        }
+        C2PAReader.append(to: &output, probe: probe, format: format)
         return output
     }
 
@@ -50,6 +48,20 @@ struct ImageInspector: FormatInspector {
     /// a bare `FFD9` there would already be a malformed file.
     func jpeg(_ probe: FileProbe) -> InspectorOutput {
         var output = InspectorOutput()
+        if let scan = probe.structure {
+            return walked(
+                probe, scan: scan, format: "JPEG",
+                evidence: "JPEG image, which ends at its end-of-image marker",
+                missing: Finding(
+                    rule: "jpeg.noEndMarker",
+                    severity: .caution,
+                    title: "No end-of-image marker",
+                    detail:
+                        "Following the file's segments never reaches the FFD9 marker that "
+                        + "ends a JPEG, so it is truncated or not really a JPEG."))
+        }
+        // No walk (a probe built from bytes alone): the last FFD9 in the two
+        // windows is the best available answer, and a forgeable one.
         let eoiOffsets = probe.offsets(of: [0xFF, 0xD9])
 
         guard let end = eoiOffsets.last else {
@@ -117,12 +129,46 @@ struct ImageInspector: FormatInspector {
         return []
     }
 
+    /// The outcome of a structure walk: trailing data measured from the end
+    /// the chain reached, or the reason it never reached one.
+    private func walked(
+        _ probe: FileProbe, scan: StructureScan, format: String, evidence: String,
+        missing: Finding
+    ) -> InspectorOutput {
+        var output = InspectorOutput()
+        if let problem = scan.problem {
+            output.findings.append(
+                ContainerStructure.malformedChain(format: format, detail: problem))
+        }
+        guard let end = scan.logicalEnd else {
+            if scan.problem == nil { output.findings.append(missing) }
+            return output
+        }
+        let trailing = TrailingData.outcome(
+            probe: probe, extent: ContainerExtent(logicalEnd: end, evidence: evidence))
+        output.findings.append(contentsOf: trailing.findings)
+        output.disclosures.append(contentsOf: trailing.disclosures)
+        return output
+    }
+
     // MARK: - PNG
 
     /// A PNG ends with its `IEND` chunk: a zero length, the type, and a CRC —
     /// twelve bytes, always last.
     func png(_ probe: FileProbe) -> InspectorOutput {
         var output = InspectorOutput()
+        if let scan = probe.structure {
+            return walked(
+                probe, scan: scan, format: "PNG",
+                evidence: "PNG image, which ends at its IEND chunk",
+                missing: Finding(
+                    rule: "png.noEndChunk",
+                    severity: .caution,
+                    title: "No IEND chunk",
+                    detail:
+                        "Following the file's chunks never reaches the IEND chunk that ends "
+                        + "a PNG, so it is truncated or not really a PNG."))
+        }
         guard let iend = probe.offsets(of: Array("IEND".utf8)).last else {
             output.findings.append(
                 Finding(
@@ -187,7 +233,7 @@ struct ImageInspector: FormatInspector {
         var output = InspectorOutput()
         // The trailer is a single 0x3B byte. One byte is too weak to search
         // for, so this only checks whether the file ends with one.
-        let last = probe.tail.last
+        guard let last = probe.tail.last else { return output }
         if last != 0x3B {
             output.findings.append(
                 Finding(
@@ -196,7 +242,7 @@ struct ImageInspector: FormatInspector {
                     title: "Does not end with a GIF trailer",
                     detail:
                         "A GIF ends with the byte 0x3B; this file ends with "
-                        + "0x\(String(format: "%02X", last ?? 0)). Either it is truncated or "
+                        + "0x\(String(format: "%02X", last)). Either it is truncated or "
                         + "something was appended."))
         }
         return output
@@ -228,7 +274,7 @@ struct ImageInspector: FormatInspector {
 
     func isoMedia(_ probe: FileProbe, name: String) -> InspectorOutput {
         var output = InspectorOutput()
-        guard let extent = ContainerStructure.isoExtent(head: probe.head, fileSize: probe.size)
+        guard let extent = ContainerStructure.isoExtent(probe: probe)
         else { return output }
         let trailing = TrailingData.outcome(probe: probe, extent: extent)
         output.findings.append(contentsOf: trailing.findings)
@@ -244,8 +290,9 @@ struct ImageInspector: FormatInspector {
     /// dangerous — so this reports rather than judges.
     func svg(_ probe: FileProbe) -> InspectorOutput {
         var output = InspectorOutput()
-        guard let text = String(data: probe.head.prefix(1 << 16), encoding: .utf8)?.lowercased()
-        else { return output }
+        // Lossy: the needles are ASCII, and a window that ends mid-character
+        // must not skip the check.
+        let text = String(decoding: probe.head, as: UTF8.self).lowercased()
 
         var active: [String] = []
         if text.contains("<script") { active.append("a <script> element") }

@@ -17,8 +17,8 @@ struct HomebrewKeg: Equatable, Sendable {
     /// dress up a dropped binary, so it does not count.
     static let prefixes = ["/usr/local/Cellar/", "/opt/homebrew/Cellar/"]
 
-    /// One line for alerts and rows: "Homebrew receipt: node 25.9.0_3, poured
-    /// from bottle, installed 2 May 2026". "Receipt" is deliberate — it is a
+    /// One line for alerts and rows: "Homebrew receipt: node 20.0.0_1, poured
+    /// from bottle, installed 1 Jan 2026". "Receipt" is deliberate — it is a
     /// claim read from a file, not a verified fact about the binary.
     var summary: String {
         var parts = ["Homebrew receipt: \(formula) \(version)"]

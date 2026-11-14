@@ -1,3 +1,4 @@
+import PDFKit
 import XCTest
 
 @testable import DragonWatch
@@ -24,6 +25,24 @@ final class ReportRendererTests: XCTestCase {
         InspectionReport(
             generated: Date(timeIntervalSince1970: 1_700_000_000),
             roots: ["/tmp"], files: files, limitHit: limit)
+    }
+
+    /// A PDF cut off at its page limit ends with a page saying so; one that
+    /// fits has no such page.
+    func testTruncatedPDFEndsWithANoticePage() throws {
+        let many = (0..<400).map { inspection(path: "/tmp/f\($0).jpg", name: "f\($0).jpg") }
+        let whole = try XCTUnwrap(ReportRenderer.pdf(report(many)))
+        let wholePages = try XCTUnwrap(PDFDocument(data: whole)).pageCount
+        XCTAssertGreaterThan(wholePages, 3, "the fixture must span several pages")
+
+        let cut = try XCTUnwrap(
+            PDFDocument(
+                data: try XCTUnwrap(
+                    ReportRenderer.pdf(report(many), maxPages: 2))))
+        XCTAssertEqual(cut.pageCount, 3, "two pages of report, then the notice")
+        XCTAssertTrue(cut.page(at: 2)?.string?.contains("REPORT TRUNCATED") == true)
+        XCTAssertFalse(
+            try XCTUnwrap(PDFDocument(data: whole)).string?.contains("REPORT TRUNCATED") == true)
     }
 
     private let sample = Finding(
@@ -290,19 +309,19 @@ final class ReportRendererTests: XCTestCase {
 
     // MARK: - Consistency found by reading real exports
 
-    /// The list shows names, so ties sort by name, and `dark_soul.png` must
+    /// The list shows names, so ties sort by name, and `maple_leaf.png` must
     /// not land after every capitalised name because of ASCII order.
     func testTiesSortByNameWithoutRegardToCase() {
         let subject = report([
-            inspection(path: "/p/SendSafely.jpeg", name: "SendSafely.jpeg"),
-            inspection(path: "/p/dark_soul.png", name: "dark_soul.png"),
-            inspection(path: "/d/PXL.jpg", name: "PXL.jpg"),
-            inspection(path: "/p/Dark_Souls.jpg", name: "Dark_Souls.jpg"),
-            inspection(path: "/d/image001.png", name: "image001.png"),
+            inspection(path: "/p/Spruce.jpeg", name: "Spruce.jpeg"),
+            inspection(path: "/p/maple_leaf.png", name: "maple_leaf.png"),
+            inspection(path: "/d/Pine.jpg", name: "Pine.jpg"),
+            inspection(path: "/p/Maple_Leafs.jpg", name: "Maple_Leafs.jpg"),
+            inspection(path: "/d/notes01.png", name: "notes01.png"),
         ])
         XCTAssertEqual(
             subject.sortedFiles.map(\.displayName),
-            ["dark_soul.png", "Dark_Souls.jpg", "image001.png", "PXL.jpg", "SendSafely.jpeg"])
+            ["maple_leaf.png", "Maple_Leafs.jpg", "notes01.png", "Pine.jpg", "Spruce.jpeg"])
         // Same name in two folders: the path decides, deterministically.
         let twins = report([
             inspection(path: "/b/x.jpg", name: "x.jpg"),

@@ -50,23 +50,34 @@ final class LaunchContextTests: XCTestCase {
     /// The chain is what tells a person an AI agent — not they — started it.
     func testAncestryWalksTheListingAndNamesTheAgentSession() throws {
         let paths: [pid_t: String] = [
-            7083: "/bin/zsh", 6645: "/Users/me/.local/share/claude/versions/2.1.248",
+            4242: "/bin/zsh", 4100: "/Users/me/.local/share/claude/versions/1.0.8",
             500: "/bin/zsh",
             400: "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
             1: "/sbin/launchd",
         ]
-        let parents: [pid_t: pid_t] = [7083: 6645, 6645: 500, 500: 400, 400: 1, 1: 0]
+        let parents: [pid_t: pid_t] = [4242: 4100, 4100: 500, 500: 400, 400: 1, 1: 0]
         let context = try XCTUnwrap(
             LaunchContext.resolve(
-                for: record(pid: 42, parent: 7083), pathsByPID: paths, parentsByPID: parents,
-                lookup: { _ in nil }))
+                for: record(pid: 42, parent: 4242), pathsByPID: paths, parentsByPID: parents,
+                identifiedPIDs: [4100], lookup: { _ in nil }))
         XCTAssertEqual(
-            context.ancestryDescription, "zsh ← 2.1.248 · claude ← zsh ← Terminal ← launchd")
+            context.ancestryDescription, "zsh ← 1.0.8 · claude ← zsh ← Terminal ← launchd")
+        XCTAssertEqual(context.agentSession?.verified, true)
+
+        // The same tree with a `claude` nobody signed: named, not vouched for.
+        let unsigned = try XCTUnwrap(
+            LaunchContext.resolve(
+                for: record(pid: 42, parent: 4242), pathsByPID: paths, parentsByPID: parents,
+                identifiedPIDs: [], lookup: { _ in nil }))
+        XCTAssertEqual(unsigned.agentSession?.verified, false)
+        let cautious = ProvenanceNote.suffix(launch: unsigned, keg: nil)
+        XCTAssertTrue(cautious.contains("unconfirmed"))
+        XCTAssertFalse(cautious.contains("not you"))
         XCTAssertEqual(context.agentSession?.product, "Claude Code")
-        XCTAssertEqual(context.agentSession?.pid, 6645)
+        XCTAssertEqual(context.agentSession?.pid, 4100)
         XCTAssertTrue(
             ProvenanceNote.suffix(launch: context, keg: nil).contains(
-                "Inside a Claude Code session (pid 6645) — an AI agent, not you, started it."))
+                "Inside a Claude Code session (pid 4100) — an AI agent, not you, started it."))
     }
 
     func testAncestryWithoutAnAgentIsQuiet() throws {
@@ -131,8 +142,8 @@ final class LaunchContextTests: XCTestCase {
     }
 
     func testSummaryNamesTheParent() {
-        let context = LaunchContext(parentPID: 7083, parentPath: "/bin/zsh", startedAt: nil)
-        XCTAssertEqual(context.summary, "zsh (pid 7083)")
+        let context = LaunchContext(parentPID: 4242, parentPath: "/bin/zsh", startedAt: nil)
+        XCTAssertEqual(context.summary, "zsh (pid 4242)")
     }
 
     func testProvenanceNoteIsEmptyWithNothingToSay() {
@@ -140,16 +151,16 @@ final class LaunchContextTests: XCTestCase {
     }
 
     func testProvenanceNoteReadsAsSentencesAfterThePath() {
-        let launch = LaunchContext(parentPID: 7083, parentPath: "/bin/zsh", startedAt: nil)
+        let launch = LaunchContext(parentPID: 4242, parentPath: "/bin/zsh", startedAt: nil)
         let keg = HomebrewKeg(
-            formula: "node", version: "25.9.0_3", installedAt: nil, pouredFromBottle: true)
+            formula: "node", version: "20.0.0_1", installedAt: nil, pouredFromBottle: true)
         XCTAssertEqual(
             ProvenanceNote.suffix(launch: launch, keg: keg),
-            " Launched by zsh (pid 7083) — /bin/zsh. Homebrew receipt: node 25.9.0_3, poured from bottle."
+            " Launched by zsh (pid 4242) — /bin/zsh. Homebrew receipt: node 20.0.0_1, poured from bottle."
         )
         XCTAssertEqual(
             ProvenanceNote.suffix(launch: launch, keg: nil),
-            " Launched by zsh (pid 7083) — /bin/zsh.")
+            " Launched by zsh (pid 4242) — /bin/zsh.")
     }
 
     // MARK: ledger
@@ -186,7 +197,7 @@ final class LaunchContextTests: XCTestCase {
 
     func testLaunchContextRoundTripsThroughTheLedger() throws {
         var ledger = ObservationLedger()
-        let launch = LaunchContext(parentPID: 7083, parentPath: "/bin/zsh", startedAt: now)
+        let launch = LaunchContext(parentPID: 4242, parentPath: "/bin/zsh", startedAt: now)
         _ = ledger.observe(path: "/a", tier: .unsigned, now: now, launch: launch)
         let data = try JSONEncoder().encode(ledger)
         let decoded = try JSONDecoder().decode(ObservationLedger.self, from: data)
@@ -226,7 +237,7 @@ final class LaunchContextTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("dw-launch-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let launch = LaunchContext(parentPID: 7083, parentPath: "/bin/zsh", startedAt: now)
+        let launch = LaunchContext(parentPID: 4242, parentPath: "/bin/zsh", startedAt: now)
         let store = ObservationStore(directory: directory)
         _ = await store.observeBatch([("/a", .unsigned, launch)], now: now, eventRetention: 86400)
         let reloaded = ObservationStore(directory: directory)
@@ -249,8 +260,8 @@ final class HomebrewKegTests: XCTestCase {
 
     func testKegRootFromCellarPaths() {
         XCTAssertEqual(
-            HomebrewKeg.kegRoot(of: "/usr/local/Cellar/node/25.9.0_3/bin/node"),
-            "/usr/local/Cellar/node/25.9.0_3")
+            HomebrewKeg.kegRoot(of: "/usr/local/Cellar/node/20.0.0_1/bin/node"),
+            "/usr/local/Cellar/node/20.0.0_1")
         XCTAssertEqual(
             HomebrewKeg.kegRoot(
                 of:
@@ -272,7 +283,7 @@ final class HomebrewKegTests: XCTestCase {
         XCTAssertNil(HomebrewKeg.kegRoot(of: "/usr/local/bin/node"), "opt symlink, not the keg")
         XCTAssertNil(HomebrewKeg.kegRoot(of: "/usr/local/Cellar/node"), "formula dir, no version")
         XCTAssertNil(
-            HomebrewKeg.kegRoot(of: "/usr/local/Cellar/node/25.9.0_3"),
+            HomebrewKeg.kegRoot(of: "/usr/local/Cellar/node/20.0.0_1"),
             "the keg itself, not a file in it")
     }
 
@@ -283,14 +294,14 @@ final class HomebrewKegTests: XCTestCase {
             """
         let keg = try XCTUnwrap(
             HomebrewKeg.parse(
-                receipt: Data(receipt.utf8), kegRoot: "/usr/local/Cellar/node/25.9.0_3"))
+                receipt: Data(receipt.utf8), kegRoot: "/usr/local/Cellar/node/20.0.0_1"))
         XCTAssertEqual(keg.formula, "node")
-        XCTAssertEqual(keg.version, "25.9.0_3")
+        XCTAssertEqual(keg.version, "20.0.0_1")
         XCTAssertEqual(keg.installedAt, Date(timeIntervalSince1970: 1_777_775_528))
         XCTAssertEqual(keg.pouredFromBottle, true)
         XCTAssertTrue(
             keg.summary.hasPrefix(
-                "Homebrew receipt: node 25.9.0_3, poured from bottle, installed "))
+                "Homebrew receipt: node 20.0.0_1, poured from bottle, installed "))
     }
 
     func testParseToleratesMissingFields() throws {

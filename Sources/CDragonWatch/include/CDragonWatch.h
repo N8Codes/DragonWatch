@@ -4,6 +4,7 @@
 #include <libproc.h>
 #include <mach/mach.h>
 #include <stdlib.h>
+#include <string.h>
 #include <mach/mach_time.h>
 #include <sys/proc_info.h>
 #include <sys/resource.h>
@@ -34,6 +35,51 @@ static inline int dw_proc_parent(pid_t pid, pid_t *ppid, double *start_epoch) {
     *start_epoch = (double)info.kp_proc.p_starttime.tv_sec
                  + (double)info.kp_proc.p_starttime.tv_usec / 1e6;
     return 0;
+}
+
+/* Short command name of a live process, for one whose executable path the
+   kernel can no longer give. Returns 0 on success; -1 when the pid is gone
+   or is a zombie, which has no executable either and must not be mistaken
+   for a process running from a deleted file. `out` needs MAXCOMLEN + 1. */
+static inline int dw_proc_live_name(pid_t pid, char *out) {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) return -1;
+    if (size < sizeof(info) || info.kp_proc.p_pid != pid) return -1;
+    if (info.kp_proc.p_stat == SZOMB) return -1;
+    memcpy(out, info.kp_proc.p_comm, MAXCOMLEN);
+    out[MAXCOMLEN] = '\0';
+    return 0;
+}
+
+/* The path a process was executed with, from KERN_PROCARGS2 — the kernel's
+   saved copy, which survives the file being deleted. Readable for our own
+   processes only. The buffer must be the full KERN_ARGMAX: a smaller one is
+   filled from the end of the argument area, not the start. Returns 0 on
+   success, -1 otherwise. */
+static inline int dw_proc_exec_path(pid_t pid, char *out, size_t out_size) {
+    int argmax = 0;
+    size_t argmax_size = sizeof(argmax);
+    int argmax_mib[2] = { CTL_KERN, KERN_ARGMAX };
+    if (sysctl(argmax_mib, 2, &argmax, &argmax_size, NULL, 0) != 0 || argmax <= 0) return -1;
+    char *args = malloc((size_t)argmax);
+    if (!args) return -1;
+    int mib[3] = { CTL_KERN, KERN_PROCARGS2, pid };
+    size_t size = (size_t)argmax;
+    int result = -1;
+    if (sysctl(mib, 3, args, &size, NULL, 0) == 0 && size > sizeof(int)) {
+        const char *path = args + sizeof(int);   /* skip argc */
+        size_t limit = size - sizeof(int);
+        size_t length = strnlen(path, limit);
+        if (length > 0 && length < limit && length < out_size) {
+            memcpy(out, path, length);
+            out[length] = '\0';
+            result = 0;
+        }
+    }
+    free(args);
+    return result;
 }
 
 /* 1 if the process holds at least one established TCP connection, else 0.

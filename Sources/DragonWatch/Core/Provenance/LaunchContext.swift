@@ -12,16 +12,23 @@ struct LaunchContext: Codable, Equatable, Sendable {
         /// Origin for a name that says nothing on its own — a binary called
         /// "1.2.3" inside `…/<tool>/versions/` is identified by `<tool>`.
         var hint: String?
+        /// Whether the binary carried a strong signature (Apple, App Store
+        /// or Developer ID) when seen. nil in ledgers written before this
+        /// was recorded, and for a parent that had already exited.
+        var identified: Bool?
 
-        init(pid: Int32, name: String, hint: String? = nil) {
+        init(pid: Int32, name: String, hint: String? = nil, identified: Bool? = nil) {
             self.pid = pid
             self.name = name
             self.hint = hint
+            self.identified = identified
         }
 
-        init(pid: Int32, path: String) {
+        init(pid: Int32, path: String, identified: Bool? = nil) {
             let name = (path as NSString).lastPathComponent
-            self.init(pid: pid, name: name, hint: ProcessNameContext.hint(name: name, path: path))
+            self.init(
+                pid: pid, name: name, hint: ProcessNameContext.hint(name: name, path: path),
+                identified: identified)
         }
 
         /// "1.2.3 · toolkit", as the process list shows it.
@@ -31,6 +38,12 @@ struct LaunchContext: Codable, Equatable, Sendable {
     /// Executable names that mean "an AI agent was driving". A flagged
     /// process spawned under one of these was not started by a person at a
     /// keyboard, and the alert should say so.
+    ///
+    /// A name is not an identity: anything can be called `claude`. The
+    /// product name, its icon and the "an agent started it" statement are
+    /// given only to a binary with a strong signature, which every native
+    /// agent CLI here ships with; a same-named binary without one is
+    /// described as exactly that.
     static let agents: [String: String] = [
         "claude": "Claude Code",
         "Claude": "Claude app",
@@ -78,13 +91,29 @@ struct LaunchContext: Codable, Equatable, Sendable {
         self.ancestors = ancestors
     }
 
-    /// The nearest AI-agent ancestor, if any, as (product name, pid).
-    var agentSession: (product: String, pid: Int32)? {
+    struct AgentSession: Equatable, Sendable {
+        let product: String
+        let pid: Int32
+        /// The ancestor's signature identifies it; the name alone does not.
+        let verified: Bool
+
+        /// One sentence for alerts and rows.
+        var note: String {
+            verified
+                ? "Inside a \(product) session (pid \(pid)) — an AI agent, not you, started it."
+                : "Under a process named like \(product) (pid \(pid)). Its signature does not "
+                    + "identify it, so that is unconfirmed."
+        }
+    }
+
+    /// The nearest ancestor that carries an AI agent's name, if any.
+    var agentSession: AgentSession? {
         for ancestor in ancestors ?? [] {
             if let product = Self.agents[ancestor.name]
                 ?? ancestor.hint.flatMap({ Self.agents[$0] })
             {
-                return (product, ancestor.pid)
+                return AgentSession(
+                    product: product, pid: ancestor.pid, verified: ancestor.identified == true)
             }
         }
         return nil
@@ -100,7 +129,7 @@ struct LaunchContext: Codable, Equatable, Sendable {
         parentPath.map { ($0 as NSString).lastPathComponent }
     }
 
-    /// One line for alerts and rows: "zsh (pid 7083)".
+    /// One line for alerts and rows: "zsh (pid 4242)".
     var summary: String {
         let name = parentName ?? "exited process"
         return "\(name) (pid \(parentPID))"
@@ -113,6 +142,7 @@ struct LaunchContext: Codable, Equatable, Sendable {
         for record: ProcessRecord,
         pathsByPID: [pid_t: String],
         parentsByPID: [pid_t: pid_t] = [:],
+        identifiedPIDs: Set<pid_t>? = nil,
         lookup: (pid_t) -> String?
     ) -> LaunchContext? {
         guard let parentPID = record.parentPID else { return nil }
@@ -127,7 +157,12 @@ struct LaunchContext: Codable, Equatable, Sendable {
         while current > 0, ancestors.count < ancestryDepth, seen.insert(current).inserted {
             let path = pathsByPID[current] ?? (current == parentPID ? parentPath : nil)
             guard let path else { break }
-            ancestors.append(Ancestor(pid: current, path: path))
+            ancestors.append(
+                Ancestor(
+                    pid: current, path: path,
+                    // Only a pid in this sample has a rating to go by.
+                    identified: pathsByPID[current] == nil
+                        ? nil : identifiedPIDs.map { $0.contains(current) }))
             guard let next = parentsByPID[current] else { break }
             current = next
         }
@@ -146,8 +181,7 @@ enum ProvenanceNote {
             let parent = launch.parentPath.map { " — \($0)" } ?? ""
             note += " Launched by \(launch.summary)\(parent)."
             if let agent = launch.agentSession {
-                note +=
-                    " Inside a \(agent.product) session (pid \(agent.pid)) — an AI agent, not you, started it."
+                note += " " + agent.note
             }
         }
         if let keg {

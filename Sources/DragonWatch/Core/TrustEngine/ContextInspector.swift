@@ -72,8 +72,15 @@ enum ContextInspector {
     /// it is the one part of `/usr` that SIP leaves writable.
     static func isOSManagedLocation(_ path: String) -> Bool {
         if path.hasPrefix("/usr/local/") { return false }
-        return ["/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/"]
-            .contains(where: path.hasPrefix)
+        return [
+            "/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/",
+            // Where xpcroleaccountd stages XPC services (Xcode's Instruments
+            // helpers among them) before launchd runs them. The folder is
+            // root-only and carries the SIP `restricted` flag (`ls -lO`), so
+            // not even root can plant a file there.
+            "/private/var/db/com.apple.xpc.roleaccountd.staging/",
+        ]
+        .contains(where: path.hasPrefix)
     }
 
     static func hasQuarantineAttribute(_ path: String) -> Bool {

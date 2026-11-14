@@ -31,12 +31,28 @@ final class TrailingDataTests: XCTestCase {
 
     // MARK: - Recognised trailers are disclosed, not flagged
 
-    /// The exact shape found on real photos: an SEF block list ending "SEFT".
-    func testSamsungTrailerIsDisclosedNotFlagged() {
+    /// Four letters at the end of the file once excused any payload.
+    func testBareSEFTFooterDoesNotExcuseAPayload() {
+        let payload = Data(repeating: 0x5A, count: 4096) + Data("SEFT".utf8)
+        XCTAssertFalse(TrailingData.hasSamsungTrailer(payload))
+        XCTAssertEqual(outcome(payload).findings.map(\.rule), ["container.trailingData"])
+        XCTAssertTrue(TrailingData.hasSamsungTrailer(samsungTrailer()))
+    }
+
+    /// The shape found on real photos: data blocks, then a directory that
+    /// opens "SEFH", then its length and "SEFT".
+    private func samsungTrailer() -> Data {
         var trailer = Data([0x00, 0x00, 0x01, 0x0A, 0x0E, 0x00, 0x00, 0x00])
-        trailer += Data("Image_UTC_Data1745547058262".utf8)
-        trailer += Data([0x00, 0x00, 0xA1, 0x0A]) + Data("MCC_Data311SEFH".utf8)
-        trailer += Data(repeating: 0x00, count: 20) + Data("SEFT".utf8)
+        trailer += Data("Image_UTC_Data1700000000000".utf8)
+        trailer += Data([0x00, 0x00, 0xA1, 0x0A]) + Data("MCC_Data000".utf8)
+        let directory = Data("SEFH".utf8) + Data(repeating: 0x00, count: 20)
+        trailer += directory
+        trailer += Data([UInt8(directory.count), 0, 0, 0]) + Data("SEFT".utf8)
+        return trailer
+    }
+
+    func testSamsungTrailerIsDisclosedNotFlagged() {
+        let trailer = samsungTrailer()
 
         let result = outcome(trailer)
         XCTAssertTrue(result.findings.isEmpty, "a camera trailer must not read as a payload")

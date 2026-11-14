@@ -63,7 +63,7 @@ final class SystemProbeTests: XCTestCase {
     /// invisible to trust assessment and every alert rule.
     func testProcessesWeDoNotOwnAreStillReported() async {
         let records = await ProcessSampler().sample()
-        let withoutMetrics = records.filter { !$0.hasMetrics }
+        let withoutMetrics = records.filter { $0.cpuPercent == nil }
         XCTAssertFalse(
             withoutMetrics.isEmpty,
             "a real Mac runs root daemons whose rusage we cannot read; if none "

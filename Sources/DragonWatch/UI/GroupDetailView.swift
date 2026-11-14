@@ -19,15 +19,7 @@ struct GroupDetailView: View {
                     .font(AppText.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close details")
-                .accessibilityLabel("Close details for \(group.name)")
+                CloseDetailsButton(subject: group.name, action: dismiss)
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)

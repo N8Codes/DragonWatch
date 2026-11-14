@@ -14,10 +14,25 @@ import Foundation
 /// inside a folder scan.
 enum BundleInspector {
 
+    /// Packages that hold documents, not code. They are still walked as one
+    /// item, but an unsigned one is the normal state, not a finding.
+    static let documentPackageExtensions: Set<String> = ["rtfd", "photoslibrary", "docset"]
+
     static func inspect(probe: FileProbe) -> InspectorOutput {
         var output = InspectorOutput()
-        output.checks.append("Bundle code signature")
         let info = SignatureInspector.inspect(path: probe.path)
+        if info.tier == .unsigned,
+            documentPackageExtensions.contains(probe.declaredExtension)
+        {
+            output.disclosures.append(
+                Disclosure(
+                    title: "Document package",
+                    detail:
+                        "A folder macOS shows as one document. It carries no code signature, "
+                        + "which is normal, and its contents were not inspected."))
+            return output
+        }
+        output.checks.append("Bundle code signature")
 
         switch info.tier {
         case .invalid:
@@ -47,6 +62,7 @@ enum BundleInspector {
                         "Signed without an identity, so the signature proves the contents are "
                         + "intact but says nothing about who produced them."))
         case .applePlatform, .appStore, .developerID, .validSigned, .osManagedUnreadable,
+            .executableMissing,
             .unreadable:
             break
         }

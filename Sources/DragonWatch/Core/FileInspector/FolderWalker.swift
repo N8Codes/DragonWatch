@@ -25,7 +25,7 @@ enum FolderWalker {
         "photoslibrary", "rtfd", "scptd",
     ]
 
-    /// Walks `roots` breadth-first, newest caps first.
+    /// Walks `roots` breadth-first.
     ///
     /// Symlinked directories are recorded as files and never entered. A link
     /// pointing at its own ancestor is the classic way to make a walker run
@@ -51,7 +51,10 @@ enum FolderWalker {
             if seenFiles.insert(key).inserted { result.files.append(path) }
         }
 
-        while !queue.isEmpty {
+        // Indexed rather than `removeFirst()`, which shifts the whole array on
+        // every pop — quadratic on a folder with hundreds of thousands of entries.
+        var next = 0
+        while next < queue.count {
             if Task.isCancelled {
                 result.limitHit = result.limitHit ?? .cancelled
                 break
@@ -61,7 +64,8 @@ enum FolderWalker {
                 break
             }
 
-            let (url, depth) = queue.removeFirst()
+            let (url, depth) = queue[next]
+            next += 1
             var isDirectory: ObjCBool = false
             guard manager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
                 // A selection that vanished between picking and walking is

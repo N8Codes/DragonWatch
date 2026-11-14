@@ -9,15 +9,12 @@ final class RingBufferTests: XCTestCase {
         buffer.append(1)
         buffer.append(2)
         XCTAssertEqual(buffer.elements, [1, 2])
-        XCTAssertFalse(buffer.isFull)
     }
 
     func testOverflowEvictsOldestFirst() {
         var buffer = RingBuffer<Int>(capacity: 3)
         for value in 1...5 { buffer.append(value) }
         XCTAssertEqual(buffer.elements, [3, 4, 5])
-        XCTAssertEqual(buffer.count, 3)
-        XCTAssertTrue(buffer.isFull)
     }
 }
 
@@ -176,6 +173,27 @@ final class SustainedSpikeRuleTests: XCTestCase {
         XCTAssertFalse(
             SustainedSpikeRule.isSpiking(
                 samples: history, threshold: 85, window: 180, now: now))
+    }
+
+    /// At the 60 s cadence only three samples fit a 180 s window and they span
+    /// ~120 s, under the fixed 80% floor — the rule could never fire there.
+    func testSustainedLoadFiresAtTheSlowestCadence() {
+        let history = samples(
+            Array(repeating: 90.0, count: 6), spacing: 60.4, endingAt: now)
+        XCTAssertFalse(
+            SustainedSpikeRule.isSpiking(
+                samples: history, threshold: 85, window: 180, now: now),
+            "precondition: the cadence-blind floor rejects this")
+        XCTAssertTrue(
+            SustainedSpikeRule.isSpiking(
+                samples: history, threshold: 85, window: 180, cadence: 60, now: now))
+    }
+
+    func testSlowCadenceStillNeedsThreeHotSamples() {
+        let history = samples([5, 5, 5, 5, 95, 95], spacing: 60.4, endingAt: now)
+        XCTAssertFalse(
+            SustainedSpikeRule.isSpiking(
+                samples: history, threshold: 85, window: 180, cadence: 60, now: now))
     }
 
     func testDipInsideWindowResets() {

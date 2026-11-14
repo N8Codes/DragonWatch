@@ -33,10 +33,15 @@ struct BaselineLedger: Codable, Sendable {
         var tier: SignatureTier
         var verdict: Verdict
         var firstSeen: Date
+        /// Day-granular, and optional so ledgers written before it decode.
+        var lastSeen: Date?
     }
 
     var executables: [String: Entry] = [:]
     var persistenceItems: Set<String> = []
+    /// SHA-256 of each persistence item's contents when last read. Optional
+    /// so ledgers written before it decode.
+    var persistenceFingerprints: [String: String]?
 
     enum Observation: Equatable, Sendable {
         case known
@@ -63,17 +68,65 @@ struct BaselineLedger: Codable, Sendable {
         }
         if assessment.badge == .trusted {
             executables[path] = Entry(
-                tier: assessment.tier, verdict: .autoTrusted, firstSeen: now)
+                tier: assessment.tier, verdict: .autoTrusted, firstSeen: now, lastSeen: now)
             return .addedTrusted
         }
         executables[path] = Entry(
-            tier: assessment.tier, verdict: .pendingReview, firstSeen: now)
+            tier: assessment.tier, verdict: .pendingReview, firstSeen: now, lastSeen: now)
         return .addedForReview
     }
 
     /// Records a persistence item; returns true when it was not yet known.
     mutating func observePersistenceItem(_ path: String) -> Bool {
         persistenceItems.insert(path).inserted
+    }
+
+    /// Records an item's contents. Returns true only when they differ from a
+    /// fingerprint recorded earlier — the first reading of an item, new or
+    /// long known, is stored silently.
+    mutating func observePersistenceFingerprint(path: String, fingerprint: String) -> Bool {
+        let previous = persistenceFingerprints?[path]
+        guard previous != fingerprint else { return false }
+        persistenceFingerprints = (persistenceFingerprints ?? [:])
+            .merging([path: fingerprint]) { _, new in new }
+        return previous != nil
+    }
+
+    /// How stale `lastSeen` may get before it is rewritten. A day, so a
+    /// long-running process costs one write a day, not one a tick.
+    static let lastSeenGranularity: TimeInterval = 86400
+
+    /// Stamps the entries seen in this sample. Returns whether any moved.
+    mutating func refreshLastSeen(_ paths: some Sequence<String>, now: Date) -> Bool {
+        var moved = false
+        for path in paths {
+            guard let seen = executables[path]?.lastSeen ?? executables[path]?.firstSeen,
+                executables[path]?.lastSeen == nil
+                    || now.timeIntervalSince(seen) >= Self.lastSeenGranularity
+            else { continue }
+            executables[path]?.lastSeen = now
+            moved = true
+        }
+        return moved
+    }
+
+    /// Forgets entries nobody has ruled on that have not run for `unseenFor`.
+    ///
+    /// The ledger used to keep every path forever, and build tools, test
+    /// runners and updaters mint new paths daily, so it only ever grew. A
+    /// verdict the user gave is kept regardless: that is their work, and
+    /// there are few of them. A forgotten path that runs again is simply new
+    /// again — a silent re-add if trusted, a fresh question if not.
+    mutating func prune(now: Date, unseenFor: TimeInterval) -> Int {
+        let cutoff = now.addingTimeInterval(-unseenFor)
+        let before = executables.count
+        executables = executables.filter { _, entry in
+            switch entry.verdict {
+            case .expected, .keepFlagging, .ignored: true
+            case .autoTrusted, .pendingReview: (entry.lastSeen ?? entry.firstSeen) >= cutoff
+            }
+        }
+        return before - executables.count
     }
 
     /// The user's answer to "is this expected?" — recorded so it is asked

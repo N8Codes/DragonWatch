@@ -12,7 +12,7 @@
 # under your home; case 4 is the same sleep loop, ad-hoc signed and then
 # patched so the signature no longer matches; case 5 runs one `yes >/dev/null`
 # per core for about four minutes. No network, no elevation, and no writes
-# outside /tmp/dw_verify*, ~/dwtest-verify/, and one plist in
+# outside /tmp/dw_verify.*, ~/dwtest-verify-*/, and one plist in
 # ~/Library/LaunchAgents.
 #
 # Usage:  ./Scripts/verify-watcher.sh          # ~12 min
@@ -22,7 +22,6 @@
 set -uo pipefail
 
 LEDGER="$HOME/Library/Application Support/DragonWatch/observations.json"
-PLIST=""  # set once RUN_ID exists
 # The ledger records every path permanently, and alerts fire once per path.
 # Fixed names therefore pass on the first run and silently test nothing after
 # that, so each run gets its own identity.

@@ -59,7 +59,7 @@ enum UniversalChecks {
         }
         // Dropping the rest silently would understate how much provenance the
         // file actually carries.
-        let hidden = probe.whereFrom.count - shown
+        let hidden = origins.count - shown
         if hidden > 0 {
             disclosures.append(
                 Disclosure(
@@ -124,10 +124,24 @@ enum UniversalChecks {
                         + "truncated, or a variant not in the table.")
             ]
 
-        case (_?, true):
+        case (let found?, true):
             // Bytes recognised, extension unknown or absent. Informational:
-            // extensionless files are normal on a Mac.
-            return []
+            // extensionless files are normal on a Mac. A text extension is a
+            // claim even though text has no signature to look up, so a
+            // binary executable under one is a mismatch. PE is left out: its
+            // signature is the two letters "MZ", which prose can start with.
+            guard found.family == .executable, found != MagicBytes.pe,
+                SourceInspector.sourceExtensions.contains(ext)
+            else { return [] }
+            return [
+                Finding(
+                    rule: "magic.mismatch",
+                    severity: .inconsistent,
+                    title: "Extension does not match contents",
+                    detail:
+                        "Named .\(displaySafe(ext, limit: 24)), a text extension, but the "
+                        + "contents are \(found.name).")
+            ]
 
         case (nil, true):
             // Text has no signature by nature. A source or text extension with
@@ -428,6 +442,9 @@ enum UniversalChecks {
         directionControls.union([
             "\u{200E}", "\u{200F}",
             "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}",
+            // Line and paragraph separators: not control characters, but
+            // text layout breaks the line on them all the same.
+            "\u{2028}", "\u{2029}",
         ])
 
     /// The embeddings, overrides and isolates that reorder displayed text —

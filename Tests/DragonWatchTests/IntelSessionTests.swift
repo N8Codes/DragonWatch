@@ -27,7 +27,7 @@ final class IntelSessionTests: XCTestCase {
     }
 
     /// The default agent string discloses the exact kernel build
-    /// ("CFNetwork/… Darwin/25.5.0") and the locale. Ours is a constant, so
+    /// ("CFNetwork/… Darwin/x.y.z") and the locale. Ours is a constant, so
     /// every DragonWatch user looks identical to the server.
     func testUserAgentDisclosesNothingAboutThisMac() throws {
         let headers = try XCTUnwrap(configuration.httpAdditionalHeaders)

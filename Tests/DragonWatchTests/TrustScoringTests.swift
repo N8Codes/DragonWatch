@@ -44,7 +44,7 @@ final class TrustScoringTests: XCTestCase {
         }
     }
 
-    /// The Wacom rule: a strongly-identified signer in a hidden folder stays trusted.
+    /// The driver rule: a strongly-identified signer in a hidden folder stays trusted.
     func testHiddenPathDoesNotDemoteDeveloperID() {
         XCTAssertEqual(
             TrustScoring.badge(tier: .developerID, modifiers: [.hiddenPath]), .trusted)

@@ -30,7 +30,7 @@ final class MergeReportTests: XCTestCase {
     }
 
     func testFilesFromBothRunsAppear() {
-        let merged = AppModel.merge(
+        let merged = InspectionModel.merge(
             report([file("/a.jpg")], roots: ["/a.jpg"]),
             report([file("/b.jpg")], roots: ["/b.jpg"]))
         XCTAssertEqual(Set(merged.files.map(\.path)), ["/a.jpg", "/b.jpg"])
@@ -39,7 +39,7 @@ final class MergeReportTests: XCTestCase {
 
     /// A second look at the same file is an update, not a duplicate row.
     func testReinspectingAPathReplacesItRatherThanDuplicating() {
-        let merged = AppModel.merge(
+        let merged = InspectionModel.merge(
             report([file("/a.jpg", .consistent)], roots: ["/a.jpg"]),
             report([file("/a.jpg", .inconsistent)], roots: ["/a.jpg"]))
         XCTAssertEqual(merged.files.count, 1)
@@ -48,7 +48,7 @@ final class MergeReportTests: XCTestCase {
     }
 
     func testScopeFiguresAccumulate() {
-        let merged = AppModel.merge(
+        let merged = InspectionModel.merge(
             report([file("/a.jpg")], roots: ["/x"], seconds: 2, folders: 3),
             report([file("/b.jpg")], roots: ["/y"], seconds: 5, folders: 4))
         XCTAssertEqual(merged.durationSeconds, 7)
@@ -58,7 +58,7 @@ final class MergeReportTests: XCTestCase {
     /// The worst verdict across everything on screen is what the headline
     /// must show, whichever run produced it.
     func testWorstVerdictSurvivesFromEitherRun() {
-        let merged = AppModel.merge(
+        let merged = InspectionModel.merge(
             report([file("/bad.jpg", .inconsistent)], roots: ["/bad.jpg"]),
             report([file("/good.jpg", .consistent)], roots: ["/good.jpg"]))
         XCTAssertEqual(merged.worstVerdict, .inconsistent)
@@ -70,7 +70,7 @@ final class MergeReportTests: XCTestCase {
             generated: Date(), roots: ["/x"], files: [], limitHit: .fileCountCap,
             durationSeconds: 1, folderCount: 1)
         let clean = report([file("/b.jpg")], roots: ["/y"])
-        XCTAssertEqual(AppModel.merge(capped, clean).limitHit, .fileCountCap)
-        XCTAssertEqual(AppModel.merge(clean, capped).limitHit, .fileCountCap)
+        XCTAssertEqual(InspectionModel.merge(capped, clean).limitHit, .fileCountCap)
+        XCTAssertEqual(InspectionModel.merge(clean, capped).limitHit, .fileCountCap)
     }
 }

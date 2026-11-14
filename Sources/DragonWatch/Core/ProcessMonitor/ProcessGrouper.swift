@@ -11,7 +11,7 @@ struct ProcessGroup: Identifiable, Sendable {
     let key: String
     let name: String
     let appBundlePath: String?
-    /// Origin context shown beside uninformative names ("2.1.222 · toolkit").
+    /// The running version, shown beside a folder-named row ("toolkit · 2.1.222").
     var contextHint: String?
     var members: [MonitoredProcess]
 
@@ -70,8 +70,8 @@ enum ProcessGrouper {
                     )
                 ].members.append(process)
             } else if let root = ContextInspector.bundleRoot(of: path) {
-                let name = ((root as NSString).lastPathComponent as NSString)
-                    .deletingPathExtension
+                let name = UniversalChecks.lineSafe(
+                    ((root as NSString).lastPathComponent as NSString).deletingPathExtension)
                 groups[
                     root,
                     default: ProcessGroup(
@@ -80,11 +80,22 @@ enum ProcessGrouper {
                     )
                 ].members.append(process)
             } else if let hint = ProcessNameContext.hint(name: process.record.name, path: path) {
-                let key = originKeyPrefix + hint.lowercased()
+                // A folder called `claude` names an agent only for a binary
+                // whose signature identifies it. One that is not goes in a
+                // row of its own under the plain folder name, so it neither
+                // borrows the product's name and icon nor hides among its
+                // sessions.
+                let agent =
+                    TrustScoring.base(for: process.trust.tier) == .trusted
+                    ? LaunchContext.agents[hint] : nil
+                let unidentified = LaunchContext.agents[hint] != nil && agent == nil
+                let key = originKeyPrefix + hint + (unidentified ? "#unidentified" : "")
                 groups[
                     key,
                     default: ProcessGroup(
-                        key: key, name: LaunchContext.agents[hint] ?? hint, appBundlePath: nil,
+                        key: key,
+                        name: agent ?? UniversalChecks.lineSafe(hint),
+                        appBundlePath: nil,
                         contextHint: nil, members: []
                     )
                 ].members.append(process)

@@ -115,6 +115,58 @@ final class UnreadableBinaryTests: XCTestCase {
         XCTAssertEqual(TrustScoring.badge(tier: info.tier, modifiers: []), .suspicious)
     }
 
+    /// A file inside a folder we may not even search fails `stat` with
+    /// EACCES, and `FileManager.fileExists` reports it missing — which rated
+    /// Xcode's staged Instruments services Unsigned -> Suspicious.
+    func testFileInsideUnsearchableFolderIsUnreadableNotUnsigned() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Unsearchable-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        let payload = directory.appendingPathComponent("payload")
+        try Data("binary".utf8).write(to: payload)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: directory.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try XCTSkipIf(
+            FileManager.default.isReadableFile(atPath: payload.path),
+            "running as root, so unsearchable cannot be simulated")
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: payload.path),
+            "precondition: the old check saw this file as missing")
+        XCTAssertTrue(SignatureInspector.existsButUnreadable(payload.path))
+        XCTAssertEqual(SignatureInspector.inspect(path: payload.path).tier, .unreadable)
+    }
+
+    /// The live case: macOS stages Xcode's XPC services in a root-only,
+    /// SIP-restricted folder. When one is present, it must not read Unsigned.
+    func testStagedXPCServiceIsNotCalledUnsigned() throws {
+        let staging = "/private/var/db/com.apple.xpc.roleaccountd.staging/exec"
+        let probe = staging + "/does-not-matter/Contents/MacOS/x"
+        var info = stat()
+        try XCTSkipUnless(
+            stat(probe, &info) != 0 && errno == EACCES,
+            "staging folder is searchable here (or absent)")
+        XCTAssertEqual(SignatureInspector.inspect(path: probe).tier, .osManagedUnreadable)
+    }
+
+    func testMissingFileIsNotUnreadable() {
+        XCTAssertFalse(
+            SignatureInspector.existsButUnreadable("/nonexistent-\(UUID().uuidString)"))
+    }
+
+    func testXPCStagingFolderIsOSManaged() {
+        XCTAssertTrue(
+            ContextInspector.isOSManagedLocation(
+                "/private/var/db/com.apple.xpc.roleaccountd.staging/exec/1.2.xpc/Contents/MacOS/x"))
+        XCTAssertFalse(ContextInspector.isOSManagedLocation("/private/var/db/other/x"))
+    }
+
     func testOSManagedLocationsExcludeUsrLocal() {
         XCTAssertTrue(ContextInspector.isOSManagedLocation("/usr/sbin/cupsd"))
         XCTAssertTrue(ContextInspector.isOSManagedLocation("/System/Library/x"))

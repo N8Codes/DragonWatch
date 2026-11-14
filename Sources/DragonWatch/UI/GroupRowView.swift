@@ -26,10 +26,7 @@ struct GroupRowView: View {
                             .font(AppText.callout)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .help(
-                                group.key.hasPrefix(ProcessGrouper.originKeyPrefix)
-                                    ? "Version of the running binary"
-                                    : "From \((group.key as NSString).deletingLastPathComponent)")
+                            .help("Version of the running binary")
                     }
                     if group.members.count > 1 {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -111,6 +108,7 @@ struct GroupRowView: View {
             Image(nsImage: IconCache.icon(forPath: appPath))
                 .resizable()
                 .frame(width: 22, height: 22)
+                .accessibilityHidden(true)  // the row's name says which app
         } else if group.key == ProcessGrouper.systemGroupKey {
             Image(systemName: "apple.logo")
                 .font(AppText.icon(15))
@@ -144,6 +142,7 @@ struct GroupRowView: View {
                 .font(AppText.icon(15))
                 .foregroundStyle(.secondary)
                 .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
         }
     }
 }
@@ -187,6 +186,8 @@ struct MetricsView: View {
             .foregroundStyle(.tertiary)
             .frame(width: 32, alignment: .trailing)
             .help("Processes in this group")
+            .accessibilityLabel(count.map { "\($0) processes" } ?? "")
+            .accessibilityHidden(count == nil)
         Text(cpu.map { String(format: "%.1f%%", $0) } ?? "—")
             .font(AppText.callout.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -194,7 +195,10 @@ struct MetricsView: View {
             .help(
                 cpu == nil
                     ? "CPU unavailable — macOS does not report metrics for processes you do not own"
-                    : "CPU — one fully busy core reads 100%, so multicore work can exceed it")
+                    : "CPU — one fully busy core reads 100%, so multicore work can exceed it"
+            )
+            .accessibilityLabel(
+                cpu.map { String(format: "CPU %.1f percent", $0) } ?? "CPU unavailable")
         Text(
             memory.map {
                 ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory)
@@ -204,6 +208,10 @@ struct MetricsView: View {
         .foregroundStyle(.tertiary)
         .frame(width: 74, alignment: .trailing)
         .help("Memory footprint")
+        .accessibilityLabel(
+            memory.map {
+                "Memory " + ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory)
+            } ?? "Memory unavailable")
     }
 }
 

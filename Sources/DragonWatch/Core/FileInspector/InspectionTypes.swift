@@ -169,12 +169,8 @@ struct InspectionReport: Codable, Sendable {
         files.filter { $0.verdict == verdict }.count
     }
 
-    /// Worst first, then by path. The tiebreak is not cosmetic: results are
-    /// assembled concurrently and `Dictionary` iteration order varies between
-    /// runs of the same binary, so without a total ordering two runs over the
-    /// same input render different reports.
     /// Worst first, then by the name the list shows, compared without
-    /// regard to case so `dark_soul.png` sits beside `Dark_Souls.jpg` rather
+    /// regard to case so `maple_leaf.png` sits beside `Maple_Leafs.jpg` rather
     /// than after every capitalised name; the exact path breaks ties. Every
     /// comparison is locale-independent, which is what keeps two exports of
     /// one run byte-identical.

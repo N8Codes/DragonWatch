@@ -22,7 +22,7 @@ enum SignatureInspector {
     // executable would make `.invalid` unreachable for the exact tampering
     // this tool exists to detect. Costs 2-7 ms more per binary, paid once per
     // (path, mtime).
-    private static let validateExecutableOnly = SecCSFlags(rawValue: 4)
+    static let validateExecutableOnly = SecCSFlags(rawValue: 4)
     // kSecCSSigningInformation | kSecCSRequirementInformation — the latter is
     // needed for the entitlements dictionary.
     private static let signingInformation = SecCSFlags(rawValue: 2 | 4)
@@ -55,6 +55,18 @@ enum SignatureInspector {
         return requirement
     }
 
+    /// True when the file is there but we may not open it — including when a
+    /// parent directory denies search, so even `stat` fails with EACCES.
+    /// `FileManager.fileExists` reports false in that case, which made a file
+    /// in a root-only folder read as Unsigned.
+    static func existsButUnreadable(_ path: String) -> Bool {
+        var info = stat()
+        if stat(path, &info) != 0 {
+            return errno == EACCES || errno == EPERM
+        }
+        return access(path, R_OK) != 0
+    }
+
     static func inspect(path: String) -> SignatureInfo {
         let url = URL(fileURLWithPath: path) as CFURL
         var codeOpt: SecStaticCode?
@@ -65,9 +77,7 @@ enum SignatureInspector {
             // root-only — /usr/sbin/cupsd among them — so DragonWatch, running
             // as you, cannot open them at all. Calling those Unsigned rated
             // them Suspicious and fired an alert naming a component of macOS.
-            if !FileManager.default.isReadableFile(atPath: path),
-                FileManager.default.fileExists(atPath: path)
-            {
+            if existsButUnreadable(path) {
                 return SignatureInfo(
                     tier: ContextInspector.isOSManagedLocation(path)
                         ? .osManagedUnreadable : .unreadable,
@@ -78,7 +88,7 @@ enum SignatureInspector {
 
         // Fail closed: if we cannot read the signing information we cannot see
         // entitlements or the ad-hoc flag, so "no risky entitlements" would be
-        // an assertion we have not earned. Report it as unreadable rather than
+        // an assertion we have not earned. Report it as invalid rather than
         // clean.
         var infoOpt: CFDictionary?
         guard

@@ -14,12 +14,12 @@ struct SettingsView: View {
         ScrollView {
             settingsContent
         }
-        .onAppear { model.loadUnclassifiedFormats() }
+        .onAppear { model.inspection.loadUnclassifiedFormats() }
     }
 
     private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            section("General") {
+            PanelSection(title: "General") {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         setLaunchAtLogin(enabled)
@@ -36,23 +36,23 @@ struct SettingsView: View {
                 }
             }
 
-            section("Watcher") {
+            PanelSection(title: "Watcher") {
                 WatcherSettingsSection(settings: model.settings)
             }
 
-            section("Vulnerability catalog") {
+            PanelSection(title: "Vulnerability catalog") {
                 IntelSettingsSection(settings: model.settings)
             }
 
-            section("History") {
+            PanelSection(title: "History") {
                 HistorySettingsSection(settings: model.settings) {
-                    model.exportHistory()
+                    model.watcher.exportHistory()
                 }
             }
 
             unrecognisedFormats
 
-            section("Baseline") {
+            PanelSection(title: "Baseline") {
                 if confirmingReset {
                     HStack(spacing: 8) {
                         Text("Re-review everything running?")
@@ -111,28 +111,19 @@ struct SettingsView: View {
     /// carrying it, and every structural finding still fires.
     @ViewBuilder
     private var unrecognisedFormats: some View {
-        if !model.unclassifiedFormats.isEmpty {
-            section("Unrecognised formats seen here") {
+        if !model.inspection.unclassifiedFormats.isEmpty {
+            PanelSection(title: "Unrecognised formats seen here") {
                 Text(
                     "Naming one records what it is for next time. It does not suppress any finding about a file that carries it."
                 )
                 .font(AppText.caption)
                 .foregroundStyle(.secondary)
-                ForEach(model.unclassifiedFormats) { entry in
+                ForEach(model.inspection.unclassifiedFormats) { entry in
                     UnrecognisedFormatRow(entry: entry) { label in
-                        model.labelUnclassifiedFormat(id: entry.id, label: label)
+                        model.inspection.labelUnclassifiedFormat(id: entry.id, label: label)
                     }
                 }
             }
-        }
-    }
-
-    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(AppText.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            content()
         }
     }
 
@@ -198,8 +189,11 @@ private struct HistorySettingsSection: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("Keep alerts for")
+            Text("Keep history for")
                 .font(AppText.caption)
+                .help(
+                    "How long alerts are kept, and how long a program that has stopped running is remembered. Your Expected / Not expected answers are kept regardless."
+                )
             Picker("", selection: $settings.historyRetentionDays) {
                 ForEach(SettingsModel.retentionChoices, id: \.self) { days in
                     Text("\(days) d").tag(days)
@@ -208,7 +202,7 @@ private struct HistorySettingsSection: View {
             .pickerStyle(.segmented)
             .controlSize(.small)
             .labelsHidden()
-            .accessibilityLabel("Keep alerts for")
+            .accessibilityLabel("Keep history for")
         }
         Button("Export History…", action: export)
             .controlSize(.small)

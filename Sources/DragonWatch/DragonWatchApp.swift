@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         // Single instance: rebuilding the bundle while an old copy runs (or a
-        // stray debug build) would otherwise put two shields in the menu bar.
+        // stray debug build) would otherwise put two eyes in the menu bar.
         // Asking our own older siblings to quit is self-management — the
         // read-only rule is about everyone else's software.
         if let bundleID = Bundle.main.bundleIdentifier {

@@ -33,7 +33,9 @@ struct ExecutableInspector: FormatInspector {
 
     func inspect(probe: FileProbe, format: FileFormat) -> InspectorOutput {
         var output = InspectorOutput()
-        output.checks.append("Mach-O architecture table")
+        if format == MagicBytes.machO || format == MagicBytes.machOFat {
+            output.checks.append("Mach-O architecture table")
+        }
         let slices = Self.architectures(in: probe)
         guard !slices.isEmpty else { return output }
 

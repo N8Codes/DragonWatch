@@ -21,13 +21,19 @@ enum SustainedSpikeRule {
         samples: [(date: Date, value: Double)],
         threshold: Double,
         window: TimeInterval,
+        cadence: TimeInterval = 0,
         now: Date
     ) -> Bool {
         let windowed = samples.filter { now.timeIntervalSince($0.date) <= window }
         guard windowed.count >= 3, let oldest = windowed.first else { return false }
         // Coverage check: the samples must actually span (most of) the window —
-        // two hot samples right after launch are not "sustained".
-        guard now.timeIntervalSince(oldest.date) >= window * 0.8 else { return false }
+        // two hot samples right after launch are not "sustained". The oldest
+        // in-window sample can sit up to one sampling gap short of the window,
+        // and a gap is the cadence plus the tick's own run time, so the floor
+        // allows two cadences: at 60 s the in-window samples span ~120 s of a
+        // 180 s window, which a fixed 80% floor could never reach.
+        let requiredSpan = min(window * 0.8, window - 2 * cadence)
+        guard now.timeIntervalSince(oldest.date) >= requiredSpan else { return false }
         return windowed.allSatisfy { $0.value >= threshold }
     }
 }

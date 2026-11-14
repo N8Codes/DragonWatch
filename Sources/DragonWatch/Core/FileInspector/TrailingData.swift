@@ -48,16 +48,14 @@ enum TrailingData {
             bytes = Data(probe.tail[(probe.tail.startIndex + start)...])
         } else if logicalEnd < Int64(probe.head.count) {
             bytes = Data(probe.head[(probe.head.startIndex + Int(logicalEnd))...])
+        } else if let scan = probe.structure, scan.logicalEnd == logicalEnd {
+            bytes = scan.trailerPrefix
         } else {
             return .unknown
         }
         guard !bytes.isEmpty else { return .unknown }
 
-        // Samsung writes a fixed "SEFT" footer as the very last four bytes of
-        // the file, which the tail window always holds.
-        if probe.tail.count >= 4, Array(probe.tail.suffix(4)) == Array("SEFT".utf8) {
-            return .samsungSEF
-        }
+        if hasSamsungTrailer(probe.tail) { return .samsungSEF }
         // A second SOI immediately after the first image is a multi-picture
         // file; cameras use it for depth maps and paired exposures.
         if MagicBytes.hasBytes([0xFF, 0xD8, 0xFF], at: 0, in: bytes) {
@@ -80,6 +78,19 @@ enum TrailingData {
         return .unknown
     }
 
+    /// Samsung's trailer ends with a directory block and an eight-byte
+    /// footer: the directory's length (little-endian), then "SEFT". The
+    /// directory itself opens with "SEFH" and is at least twelve bytes — the
+    /// same test ExifTool's Samsung reader applies. The four footer letters
+    /// alone were enough once, so appending them excused any payload.
+    static func hasSamsungTrailer(_ tail: Data) -> Bool {
+        guard tail.count >= 20, Array(tail.suffix(4)) == Array("SEFT".utf8),
+            let length = ByteReader.uint32LE(tail, at: tail.count - 8), length >= 12
+        else { return false }
+        let start = tail.count - 8 - Int(length)
+        return start >= 0 && MagicBytes.hasBytes(Array("SEFH".utf8), at: start, in: tail)
+    }
+
     /// The finding or disclosure for data past the end. A few slack bytes are
     /// ignored: encoders pad to even boundaries, and a rule that fires on
     /// every third photo gets turned off.
@@ -94,7 +105,7 @@ enum TrailingData {
         if let name = kind.name {
             output.disclosures.append(
                 Disclosure(
-                    title: "Data after the image",
+                    title: "Data after the end of the file",
                     detail:
                         "\(extra) bytes follow the end of the \(extent.evidence), and they look "
                         + "like \(name). Recognising it says what it is, not that it is "
